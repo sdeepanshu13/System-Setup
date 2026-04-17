@@ -1,0 +1,164 @@
+{
+    "$schema": "https://aka.ms/winget-packages.schema.2.0.json",
+    "CreationDate": "2026-04-17T00:00:00.000-00:00",
+    "Sources": [
+        {
+            "Packages": [
+                {
+                    "PackageIdentifier": "Git.Git"
+                },
+                {
+                    "PackageIdentifier": "GitHub.cli"
+                },
+                {
+                    "PackageIdentifier": "GitHub.GitHubDesktop"
+                },
+                {
+                    "PackageIdentifier": "GitHub.Copilot"
+                },
+                {
+                    "PackageIdentifier": "Microsoft.VisualStudioCode"
+                },
+                {
+                    "PackageIdentifier": "Microsoft.VisualStudio.Enterprise"
+                },
+                {
+                    "PackageIdentifier": "JetBrains.Toolbox"
+                },
+                {
+                    "PackageIdentifier": "Docker.DockerDesktop"
+                },
+                {
+                    "PackageIdentifier": "Microsoft.WindowsTerminal"
+                },
+                {
+                    "PackageIdentifier": "Warp.Warp"
+                },
+                {
+                    "PackageIdentifier": "Microsoft.PowerShell"
+                },
+                {
+                    "PackageIdentifier": "Python.Python.3.14"
+                },
+                {
+                    "PackageIdentifier": "Python.Python.3.13"
+                },
+                {
+                    "PackageIdentifier": "Python.Launcher"
+                },
+                {
+                    "PackageIdentifier": "CoreyButler.NVMforWindows"
+                },
+                {
+                    "PackageIdentifier": "Microsoft.DotNet.SDK.10"
+                },
+                {
+                    "PackageIdentifier": "Microsoft.AzureCLI"
+                },
+                {
+                    "PackageIdentifier": "Redis.Redis"
+                },
+                {
+                    "PackageIdentifier": "Google.Chrome.EXE"
+                },
+                {
+                    "PackageIdentifier": "Mozilla.Firefox"
+                },
+                {
+                    "PackageIdentifier": "Microsoft.Edge"
+                },
+                {
+                    "PackageIdentifier": "Microsoft.Teams"
+                },
+                {
+                    "PackageIdentifier": "Microsoft.Office"
+                },
+                {
+                    "PackageIdentifier": "Microsoft.OneDrive"
+                },
+                {
+                    "PackageIdentifier": "Google.GoogleDrive"
+                },
+                {
+                    "PackageIdentifier": "Adobe.Acrobat.Reader.64-bit"
+                },
+                {
+                    "PackageIdentifier": "VideoLAN.VLC"
+                },
+                {
+                    "PackageIdentifier": "Unity.UnityHub"
+                },
+                {
+                    "PackageIdentifier": "Samsung.SmartSwitch"
+                },
+                {
+                    "PackageIdentifier": "Yubico.YubikeyManager"
+                },
+                {
+                    "PackageIdentifier": "Yubico.YubiKeySmartCardMinidriver"
+                },
+                {
+                    "PackageIdentifier": "Microsoft.AzureVPNClient"
+                },
+                {
+                    "PackageIdentifier": "Microsoft.WSL"
+                },
+                {
+                    "PackageIdentifier": "Canonical.Ubuntu.2404"
+                },
+                {
+                    "PackageIdentifier": "Microsoft.DotNet.Framework.DeveloperPack.4.6"
+                },
+                {
+                    "PackageIdentifier": "Microsoft.DotNet.Framework.DeveloperPack_4"
+                },
+                {
+                    "PackageIdentifier": "Microsoft.DotNet.DesktopRuntime.8"
+                },
+                {
+                    "PackageIdentifier": "Microsoft.DotNet.AspNetCore.8"
+                },
+                {
+                    "PackageIdentifier": "Microsoft.DotNet.AspNetCore.5"
+                },
+                {
+                    "PackageIdentifier": "Microsoft.VCRedist.2015+.x64"
+                },
+                {
+                    "PackageIdentifier": "Microsoft.VCRedist.2015+.x86"
+                },
+                {
+                    "PackageIdentifier": "Microsoft.VCRedist.2010.x64"
+                },
+                {
+                    "PackageIdentifier": "Microsoft.VCRedist.2010.x86"
+                },
+                {
+                    "PackageIdentifier": "Microsoft.VCRedist.2008.x86"
+                },
+                {
+                    "PackageIdentifier": "Microsoft.WebDeploy"
+                },
+                {
+                    "PackageIdentifier": "Microsoft.msodbcsql.17"
+                },
+                {
+                    "PackageIdentifier": "Microsoft.CLRTypesSQLServer.2019"
+                },
+                {
+                    "PackageIdentifier": "Microsoft.GlobalSecureAccessClient"
+                },
+                {
+                    "PackageIdentifier": "Microsoft.RemoteHelp"
+                }
+            ],
+            "SourceDetails": {
+                "Argument": "https://cdn.winget.microsoft.com/cache",
+                "Identifier": "Microsoft.Winget.Source_8wekyb3d8bbwe",
+                "Name": "winget",
+                "Type": "Microsoft.PreIndexed.Package"
+            }
+        }
+    ],
+    "WinGetVersion": "1.28.220"
+}

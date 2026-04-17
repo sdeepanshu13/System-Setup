@@ -3,19 +3,28 @@
     Restores a Windows dev machine by installing all software via winget.
 .DESCRIPTION
     Reads winget-packages.json from the script directory, installs all packages,
-    and reports successes/failures. Run as Administrator.
-.PARAMETER WhatIf
+    and reports successes/failures. Best run as Administrator.
+.PARAMETER WhatIfMode
     Preview packages without installing.
+.PARAMETER SkipVerify
+    Skip post-install verification (faster).
 #>
 
-#Requires -RunAsAdministrator
 param(
-    [switch]$WhatIfMode
+    [switch]$WhatIfMode,
+    [switch]$SkipVerify
 )
 
 $ErrorActionPreference = 'Continue'
 $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Definition
 $wingetJson = Join-Path $ScriptDir "winget-packages.json"
+
+# ─── Soft admin check ────────────────────────────────────
+$isAdmin = ([Security.Principal.WindowsPrincipal] [Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole(
+    [Security.Principal.WindowsBuiltInRole]::Administrator)
+if (-not $isAdmin) {
+    Write-Warning "Not running as Administrator. Some packages may fail to install."
+}
 
 # ─── Validation ───────────────────────────────────────────
 if (-not (Get-Command winget -ErrorAction SilentlyContinue)) {
@@ -56,36 +65,49 @@ Write-Host ""
 Write-Host "Packages to install: $($packages.Count)" -ForegroundColor Yellow
 Write-Host ""
 
-# ─── Categorize for display ──────────────────────────────
-$categories = [ordered]@{
-    "Dev Tools"    = @("Git.Git", "GitHub.cli", "GitHub.GitHubDesktop", "GitHub.Copilot",
-        "Microsoft.VisualStudioCode", "Microsoft.VisualStudio.Enterprise",
-        "JetBrains.Toolbox", "Docker.DockerDesktop", "Warp.Warp")
-    "Languages"    = @("Python.Python.3.14", "Python.Python.3.13", "Python.Launcher",
-        "CoreyButler.NVMforWindows", "Microsoft.DotNet.SDK.10")
-    "CLI / Infra"  = @("Microsoft.PowerShell", "Microsoft.WindowsTerminal",
-        "Microsoft.AzureCLI", "Redis.Redis", "Microsoft.WSL", "Canonical.Ubuntu.2404")
-    "Browsers"     = @("Google.Chrome.EXE", "Mozilla.Firefox", "Microsoft.Edge")
-    "Productivity" = @("Microsoft.Teams", "Microsoft.Office", "Microsoft.OneDrive",
-        "Google.GoogleDrive", "Adobe.Acrobat.Reader.64-bit")
-    "Media / Misc" = @("VideoLAN.VLC", "Unity.UnityHub", "Samsung.SmartSwitch",
-        "Yubico.YubikeyManager", "Yubico.YubiKeySmartCardMinidriver")
-}
-
-foreach ($cat in $categories.Keys) {
-    $matched = $packages | Where-Object { $_ -in $categories[$cat] }
-    if ($matched) {
-        Write-Host "  [$cat]" -ForegroundColor Green
-        $matched | ForEach-Object { Write-Host "    - $_" }
+# ─── Categorize for display (auto-derived from package IDs) ──
+function Get-Category([string]$id) {
+    switch -Wildcard ($id) {
+        'Git.*'                    { return 'Dev Tools' }
+        'GitHub.*'                 { return 'Dev Tools' }
+        'Microsoft.VisualStudio*'  { return 'Dev Tools' }
+        'JetBrains.*'              { return 'Dev Tools' }
+        'Docker.*'                 { return 'Dev Tools' }
+        'Warp.*'                   { return 'Dev Tools' }
+        'Python.*'                 { return 'Languages' }
+        'CoreyButler.*'            { return 'Languages' }
+        'Microsoft.DotNet.SDK*'    { return 'Languages' }
+        'Microsoft.PowerShell'     { return 'CLI / Infra' }
+        'Microsoft.WindowsTerminal' { return 'CLI / Infra' }
+        'Microsoft.AzureCLI'       { return 'CLI / Infra' }
+        'Redis.*'                  { return 'CLI / Infra' }
+        'Microsoft.WSL'            { return 'CLI / Infra' }
+        'Canonical.*'              { return 'CLI / Infra' }
+        'Google.Chrome*'           { return 'Browsers' }
+        'Mozilla.*'                { return 'Browsers' }
+        'Microsoft.Edge'           { return 'Browsers' }
+        'Microsoft.Teams'          { return 'Productivity' }
+        'Microsoft.Office'         { return 'Productivity' }
+        'Microsoft.OneDrive'       { return 'Productivity' }
+        'Google.GoogleDrive'       { return 'Productivity' }
+        'Adobe.*'                  { return 'Productivity' }
+        'VideoLAN.*'               { return 'Media / Misc' }
+        'Unity.*'                  { return 'Media / Misc' }
+        'Samsung.*'                { return 'Media / Misc' }
+        'Yubico.*'                 { return 'Media / Misc' }
+        'Microsoft.VCRedist*'      { return 'Runtimes' }
+        'Microsoft.VCLibs*'        { return 'Runtimes' }
+        'Microsoft.DotNet.*'       { return 'Runtimes' }
+        'Microsoft.UI.Xaml*'       { return 'Runtimes' }
+        'Microsoft.WindowsApp*'    { return 'Runtimes' }
+        default                    { return 'Other' }
     }
 }
 
-# Show uncategorized (runtimes, libs, etc.)
-$allCategorized = $categories.Values | ForEach-Object { $_ }
-$uncategorized = $packages | Where-Object { $_ -notin $allCategorized }
-if ($uncategorized) {
-    Write-Host "  [Runtimes & Libraries]" -ForegroundColor Green
-    $uncategorized | ForEach-Object { Write-Host "    - $_" }
+$grouped = $packages | Group-Object { Get-Category $_ } | Sort-Object Name
+foreach ($group in $grouped) {
+    Write-Host "  [$($group.Name)]" -ForegroundColor Green
+    $group.Group | ForEach-Object { Write-Host "    - $_" }
 }
 
 Write-Host ""
@@ -111,38 +133,43 @@ $importArgs = @(
 Write-Host ""
 
 # ─── Verify installation ────────────────────────────────
-Write-Host "Verifying installed packages..." -ForegroundColor Cyan
-
-$installedRaw = winget list --source winget 2>$null | Out-String
-$succeeded = [System.Collections.Generic.List[string]]::new()
-$failed = [System.Collections.Generic.List[string]]::new()
-
-foreach ($pkg in $packages) {
-    if ($installedRaw -match [regex]::Escape($pkg)) {
-        $succeeded.Add($pkg)
-    }
-    else {
-        $failed.Add($pkg)
-    }
-}
-
-Write-Host ""
-Write-Host "=============================================" -ForegroundColor Cyan
-Write-Host " Results" -ForegroundColor Cyan
-Write-Host "=============================================" -ForegroundColor Cyan
-Write-Host "  Installed: $($succeeded.Count)/$($packages.Count)" -ForegroundColor Green
-
-if ($failed.Count -gt 0) {
-    Write-Host "  Failed:    $($failed.Count)" -ForegroundColor Red
-    Write-Host ""
-    Write-Host "  Failed packages:" -ForegroundColor Red
-    $failed | ForEach-Object { Write-Host "    - $_" -ForegroundColor Red }
-    Write-Host ""
-    Write-Host "  To retry failed packages individually:" -ForegroundColor Yellow
-    $failed | ForEach-Object { Write-Host "    winget install --id $_ --accept-package-agreements" -ForegroundColor DarkGray }
+if ($SkipVerify) {
+    Write-Host "Skipping verification (use without -SkipVerify to check)." -ForegroundColor DarkGray
 }
 else {
-    Write-Host "  All packages installed successfully!" -ForegroundColor Green
+    Write-Host "Verifying installed packages..." -ForegroundColor Cyan
+
+    $installedRaw = winget list --source winget 2>$null | Out-String
+    $succeeded = [System.Collections.Generic.List[string]]::new()
+    $failed = [System.Collections.Generic.List[string]]::new()
+
+    foreach ($pkg in $packages) {
+        if ($installedRaw -match [regex]::Escape($pkg)) {
+            $succeeded.Add($pkg)
+        }
+        else {
+            $failed.Add($pkg)
+        }
+    }
+
+    Write-Host ""
+    Write-Host "=============================================" -ForegroundColor Cyan
+    Write-Host " Results" -ForegroundColor Cyan
+    Write-Host "=============================================" -ForegroundColor Cyan
+    Write-Host "  Installed: $($succeeded.Count)/$($packages.Count)" -ForegroundColor Green
+
+    if ($failed.Count -gt 0) {
+        Write-Host "  Failed:    $($failed.Count)" -ForegroundColor Red
+        Write-Host ""
+        Write-Host "  Failed packages:" -ForegroundColor Red
+        $failed | ForEach-Object { Write-Host "    - $_" -ForegroundColor Red }
+        Write-Host ""
+        Write-Host "  To retry failed packages individually:" -ForegroundColor Yellow
+        $failed | ForEach-Object { Write-Host "    winget install --id $_ --accept-package-agreements" -ForegroundColor DarkGray }
+    }
+    else {
+        Write-Host "  All packages installed successfully!" -ForegroundColor Green
+    }
 }
 
 Write-Host ""

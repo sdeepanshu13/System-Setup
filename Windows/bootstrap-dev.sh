@@ -28,9 +28,81 @@ clone_if_missing() {
     fi
 }
 
+# Detect runtime environment
+detect_environment() {
+    if [[ "$OSTYPE" == "msys" || "$OSTYPE" == "cygwin" || -n "$MSYSTEM" ]]; then
+        echo "gitbash"
+    elif [[ -f /proc/version ]] && grep -qi microsoft /proc/version 2>/dev/null; then
+        echo "wsl"
+    elif [[ "$OSTYPE" == "linux-gnu"* ]]; then
+        echo "linux"
+    elif [[ "$OSTYPE" == "darwin"* ]]; then
+        echo "macos"
+    else
+        echo "unknown"
+    fi
+}
+
+# Install zsh in Git Bash (MSYS2/MINGW)
+install_zsh_gitbash() {
+    echo "📦 Installing zsh for Git Bash..."
+    # Try pacman first (Git for Windows SDK / full MSYS2)
+    if command -v pacman &>/dev/null; then
+        pacman -S --noconfirm zsh 2>/dev/null && return 0
+    fi
+
+    # Download from MSYS2 repository
+    local TEMP_DIR
+    TEMP_DIR=$(mktemp -d)
+    local ZSH_URL="https://mirror.msys2.org/msys/x86_64/zsh-5.9-2-x86_64.pkg.tar.zst"
+    echo "  ⬇️  Downloading zsh package..."
+    curl -fsSL -o "$TEMP_DIR/zsh.pkg.tar.zst" "$ZSH_URL" || {
+        echo "❌ Failed to download zsh package."
+        rm -rf "$TEMP_DIR"
+        return 1
+    }
+
+    # Extract using available tools
+    cd "$TEMP_DIR" || return 1
+    if command -v zstd &>/dev/null; then
+        zstd -d zsh.pkg.tar.zst -o zsh.pkg.tar && tar xf zsh.pkg.tar
+    elif tar --zstd -xf zsh.pkg.tar.zst 2>/dev/null; then
+        : # tar with built-in zstd worked
+    else
+        echo "❌ Cannot extract zsh package (no zstd support)."
+        echo "   Install zsh manually: https://packages.msys2.org/package/zsh"
+        cd - > /dev/null
+        rm -rf "$TEMP_DIR"
+        return 1
+    fi
+
+    # Copy to Git Bash root (requires write access to Git install dir)
+    if [[ -d "$TEMP_DIR/usr" ]]; then
+        cp -rf "$TEMP_DIR/usr/"* / 2>/dev/null || {
+            echo "⚠️  Permission denied. Re-run Git Bash as Administrator."
+            cd - > /dev/null
+            rm -rf "$TEMP_DIR"
+            return 1
+        }
+    fi
+
+    cd - > /dev/null
+    rm -rf "$TEMP_DIR"
+
+    if command -v zsh &>/dev/null; then
+        echo "✅ zsh installed: $(zsh --version)"
+        return 0
+    fi
+    echo "❌ zsh installation failed."
+    return 1
+}
+
 echo "============================================="
 echo "🚀 Deepanshu Dev Machine Bootstrap Starting"
 echo "============================================="
+
+ENV_TYPE=$(detect_environment)
+echo "🔍 Detected environment: $ENV_TYPE"
 
 # ---------------------------
 # 0) Install winget packages (Phase 1)
@@ -48,7 +120,7 @@ else
     echo "⚠️  restore.ps1 not found — skipping winget package install."
 fi
 
-echo "🔧 Phase 2: Shell & dotfiles setup"
+echo "🔧 Phase 2: Git & SSH setup"
 echo ""
 
 # ---------------------------
@@ -75,7 +147,82 @@ echo "✅ Git defaults set."
 echo ""
 
 # ---------------------------
-# 2) Install Oh My Zsh
+# 2) Generate SSH key for GitHub
+# ---------------------------
+echo "🔑 SSH Key Setup for GitHub"
+
+if [[ -z "${GIT_EMAIL:-}" ]]; then
+    echo "⚠️  No email provided — skipping SSH key generation."
+else
+    SSH_KEY="$HOME/.ssh/id_ed25519"
+    if [[ -f "$SSH_KEY" ]]; then
+        echo "✅ SSH key already exists at $SSH_KEY — skipping generation."
+    else
+        echo "🔐 Generating ed25519 SSH key..."
+        mkdir -p "$HOME/.ssh"
+        chmod 700 "$HOME/.ssh"
+        ssh-keygen -t ed25519 -C "$GIT_EMAIL" -f "$SSH_KEY" -N ""
+        echo "✅ SSH key generated."
+    fi
+
+    # Start ssh-agent and add the key
+    eval "$(ssh-agent -s)" > /dev/null 2>&1
+    ssh-add "$SSH_KEY" 2>/dev/null || true
+
+    # Use Windows OpenSSH to avoid MSYS2 vs Windows agent conflict
+    if [[ "$ENV_TYPE" == "gitbash" && -f "/c/Windows/System32/OpenSSH/ssh.exe" ]]; then
+        git config --global core.sshCommand "C:/Windows/System32/OpenSSH/ssh.exe"
+    fi
+
+    # Start Windows ssh-agent service (Git Bash / Windows only)
+    if [[ "$ENV_TYPE" == "gitbash" ]]; then
+        powershell.exe -NoProfile -ExecutionPolicy Bypass -Command "
+            \$svc = Get-Service -Name ssh-agent -ErrorAction SilentlyContinue
+            if (\$svc) {
+                if (\$svc.StartType -eq 'Disabled') { Set-Service -Name ssh-agent -StartupType Manual }
+                if (\$svc.Status -ne 'Running') { Start-Service ssh-agent }
+            }
+        " 2>/dev/null || true
+    fi
+
+    # Save public key for easy copying
+    PUB_KEY_FILE="$SCRIPT_DIR/github-ssh-pubkey.txt"
+    cp "$SSH_KEY.pub" "$PUB_KEY_FILE"
+
+    echo ""
+    echo "============================================="
+    echo "🔑 Your GitHub SSH Public Key"
+    echo "============================================="
+    cat "$SSH_KEY.pub"
+    echo ""
+    echo "============================================="
+    echo "📋 Saved to: $PUB_KEY_FILE"
+    echo "👉 Add to GitHub: https://github.com/settings/ssh/new"
+    echo ""
+fi
+
+echo "✅ Phase 2 complete (Git & SSH)."
+echo ""
+echo "🔧 Phase 3: Shell & dotfiles setup"
+echo ""
+
+# ---------------------------
+# 3) Ensure zsh is available
+# ---------------------------
+ZSH_AVAILABLE=true
+if ! command -v zsh &>/dev/null; then
+    if [[ "$ENV_TYPE" == "gitbash" ]]; then
+        install_zsh_gitbash || ZSH_AVAILABLE=false
+    else
+        echo "⚠️  zsh not found — skipping zsh-related setup."
+        ZSH_AVAILABLE=false
+    fi
+fi
+
+if $ZSH_AVAILABLE; then
+
+# ---------------------------
+# 4) Install Oh My Zsh
 # ---------------------------
 if [[ -d "$HOME/.oh-my-zsh" ]]; then
     echo "✅ Oh My Zsh already installed, skipping."
@@ -87,7 +234,7 @@ else
 fi
 
 # ---------------------------
-# 3) Install Powerlevel10k + plugins (all shallow clones)
+# 5) Install Powerlevel10k + plugins (all shallow clones)
 # ---------------------------
 clone_if_missing "https://github.com/romkatv/powerlevel10k.git" \
     "$ZSH_CUSTOM_DIR/themes/powerlevel10k" "Powerlevel10k"
@@ -98,8 +245,10 @@ clone_if_missing "https://github.com/zsh-users/zsh-autosuggestions.git" \
 clone_if_missing "https://github.com/zsh-users/zsh-syntax-highlighting.git" \
     "$ZSH_CUSTOM_DIR/plugins/zsh-syntax-highlighting" "zsh-syntax-highlighting"
 
+fi  # end ZSH_AVAILABLE (sections 4-5)
+
 # ---------------------------
-# 4) Install MesloLGS Nerd Font
+# 6) Install MesloLGS Nerd Font
 # ---------------------------
 echo "🔤 Installing MesloLGS Nerd Font..."
 
@@ -143,8 +292,10 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -Command "
 " 2>/dev/null || echo "  ⚠️  Font install requires Administrator — install manually if needed."
 echo "✅ MesloLGS Nerd Font done."
 
+if $ZSH_AVAILABLE; then
+
 # ---------------------------
-# 5) Deploy optimized .zshrc
+# 7) Deploy optimized .zshrc
 # ---------------------------
 echo "📝 Setting up .zshrc..."
 if [[ ! -f "$ZSHRC_SRC" ]]; then
@@ -159,84 +310,38 @@ else
 fi
 
 # ---------------------------
-# 6) Make zsh default in Git Bash
+# 8) Make zsh default in Git Bash
 # ---------------------------
-echo "🔧 Setting zsh as default shell in Git Bash..."
-BASHRC="$HOME/.bashrc"
+if [[ "$ENV_TYPE" == "gitbash" ]]; then
+    echo "🔧 Setting zsh as default shell in Git Bash..."
+    BASHRC="$HOME/.bashrc"
 
-if [[ -f "$BASHRC" ]] && grep -q 'exec zsh' "$BASHRC" 2>/dev/null; then
-    echo "✅ .bashrc already launches zsh."
-else
-    if [[ -f "$BASHRC" ]]; then
-        cp "$BASHRC" "$BASHRC.backup.$(date +%Y%m%d%H%M%S)"
-        echo "  Backed up existing .bashrc"
-    fi
-    cat >> "$BASHRC" << 'BASH_EOF'
+    if [[ -f "$BASHRC" ]] && grep -q 'exec zsh' "$BASHRC" 2>/dev/null; then
+        echo "✅ .bashrc already launches zsh."
+    else
+        if [[ -f "$BASHRC" ]]; then
+            cp "$BASHRC" "$BASHRC.backup.$(date +%Y%m%d%H%M%S)"
+            echo "  Backed up existing .bashrc"
+        fi
+        cat >> "$BASHRC" << 'BASH_EOF'
 
 # Auto-start zsh
 if [ -t 1 ] && [ -z "$ZSH_VERSION" ]; then
   exec zsh
 fi
 BASH_EOF
-    echo "✅ .bashrc configured to launch zsh."
+        echo "✅ .bashrc configured to launch zsh."
+    fi
 fi
 
-# ---------------------------
-# 7) Generate SSH key for GitHub
-# ---------------------------
-echo ""
-echo "🔑 SSH Key Setup for GitHub"
-
-if [[ -z "${GIT_EMAIL:-}" ]]; then
-    echo "⚠️  No email provided earlier — skipping SSH key generation."
 else
-    SSH_KEY="$HOME/.ssh/id_ed25519"
-    if [[ -f "$SSH_KEY" ]]; then
-        echo "✅ SSH key already exists at $SSH_KEY — skipping generation."
-    else
-        echo "🔐 Generating ed25519 SSH key..."
-        mkdir -p "$HOME/.ssh"
-        chmod 700 "$HOME/.ssh"
-        ssh-keygen -t ed25519 -C "$GIT_EMAIL" -f "$SSH_KEY" -N ""
-        echo "✅ SSH key generated."
-    fi
-
-    # Start ssh-agent and add the key
-    eval "$(ssh-agent -s)" > /dev/null 2>&1
-    ssh-add "$SSH_KEY" 2>/dev/null || true
-
-    # Use Windows OpenSSH to avoid MSYS2 vs Windows agent conflict
-    if [[ -f "/c/Windows/System32/OpenSSH/ssh.exe" ]]; then
-        git config --global core.sshCommand "C:/Windows/System32/OpenSSH/ssh.exe"
-    fi
-
-    # Start Windows ssh-agent service
-    powershell.exe -NoProfile -ExecutionPolicy Bypass -Command "
-        \$svc = Get-Service -Name ssh-agent -ErrorAction SilentlyContinue
-        if (\$svc) {
-            if (\$svc.StartType -eq 'Disabled') { Set-Service -Name ssh-agent -StartupType Manual }
-            if (\$svc.Status -ne 'Running') { Start-Service ssh-agent }
-        }
-    " 2>/dev/null || true
-
-    # Save public key for easy copying
-    PUB_KEY_FILE="$SCRIPT_DIR/github-ssh-pubkey.txt"
-    cp "$SSH_KEY.pub" "$PUB_KEY_FILE"
-
     echo ""
-    echo "============================================="
-    echo "🔑 Your GitHub SSH Public Key"
-    echo "============================================="
-    cat "$SSH_KEY.pub"
-    echo ""
-    echo "============================================="
-    echo "📋 Saved to: $PUB_KEY_FILE"
-    echo "👉 Add to GitHub: https://github.com/settings/ssh/new"
-    echo ""
-fi
+    echo "⚠️  Skipping zsh setup (zsh not available)."
+    echo "   Install zsh and re-run for Oh My Zsh, Powerlevel10k, and .zshrc config."
+fi  # end ZSH_AVAILABLE (sections 7-8)
 
 # ---------------------------
-# 8) Install VS Code extensions
+# 9) Install VS Code extensions
 # ---------------------------
 VSCODE_EXT_FILE="$SCRIPT_DIR/vscode-extensions.txt"
 if [[ -f "$VSCODE_EXT_FILE" ]] && command -v code &>/dev/null; then
@@ -268,7 +373,7 @@ else
 fi
 
 # ---------------------------
-# 9) Install Node.js LTS via nvm
+# 10) Install Node.js LTS via nvm
 # ---------------------------
 echo "📦 Checking Node.js / nvm..."
 set +e  # nvm commands can return non-zero
@@ -289,7 +394,7 @@ fi
 set -e
 
 # ---------------------------
-# 10) Configure Windows Terminal font (best-effort)
+# 11) Configure Windows Terminal font (best-effort)
 # ---------------------------
 WT_SETTINGS="$HOME/AppData/Local/Packages/Microsoft.WindowsTerminal_8wekyb3d8bbwe/LocalState/settings.json"
 if [[ -f "$WT_SETTINGS" ]]; then

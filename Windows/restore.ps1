@@ -113,7 +113,7 @@ foreach ($group in $grouped) {
 Write-Host ""
 
 if ($WhatIfMode) {
-    Write-Host "WhatIf mode — no packages will be installed." -ForegroundColor Yellow
+    Write-Host "WhatIf mode -- no packages will be installed." -ForegroundColor Yellow
     exit 0
 }
 
@@ -174,4 +174,4 @@ else {
 
 Write-Host ""
 Write-Host "Next: Run bootstrap-dev.sh in Git Bash for zsh/p10k setup." -ForegroundColor Yellow
-Write-Host ""
+Write-Host ""

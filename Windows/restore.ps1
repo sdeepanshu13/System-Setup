@@ -258,11 +258,15 @@ else {
     # fully disabled (it tries to write to the registry / refresh PATH and
     # winget kills it). We're already elevated, so the only "prompts" winget
     # would suppress are progress bars -- safe to allow.
+    # --ignore-security-hash works around the recurring INSTALLER_HASH_MISMATCH
+    # (0x8A150006) failure on Git.Git when winget's manifest lags the actual
+    # Git for Windows release.
     $priorityArgs = @(
         '--silent',
         '--accept-package-agreements',
         '--accept-source-agreements',
         '--ignore-warnings',
+        '--ignore-security-hash',
         '--force',
         '--source', 'winget'
     )

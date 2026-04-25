@@ -100,13 +100,39 @@ if (-not $SkipPhase2) {
     Write-Host ""
     Write-Host "Phase 2: zsh / dotfiles / SSH setup (via Git Bash)..." -ForegroundColor Cyan
 
-    # Prompt for Git identity here in PowerShell. The bash script runs
-    # non-interactively (no TTY) so it can't prompt itself.
+    # Try to read existing git identity so we don't re-prompt on every run.
+    $existingGitExe = $null
+    foreach ($p in @("$env:ProgramFiles\Git\cmd\git.exe",
+                     "${env:ProgramFiles(x86)}\Git\cmd\git.exe",
+                     "$env:LOCALAPPDATA\Programs\Git\cmd\git.exe")) {
+        if (Test-Path $p) { $existingGitExe = $p; break }
+    }
+    if (-not $existingGitExe) {
+        $cmd = Get-Command git.exe -ErrorAction SilentlyContinue
+        if ($cmd) { $existingGitExe = $cmd.Source }
+    }
+    if ($existingGitExe) {
+        if (-not $GitName) {
+            try { $GitName = (& $existingGitExe config --global user.name) 2>$null } catch { }
+        }
+        if (-not $GitEmail) {
+            try { $GitEmail = (& $existingGitExe config --global user.email) 2>$null } catch { }
+        }
+    }
+
+    # Prompt for Git identity here in PowerShell only if still missing.
+    # The bash script runs non-interactively (no TTY) so it can't prompt itself.
     if (-not $GitName) {
         $GitName = Read-Host "Enter your full name (for git config)"
     }
+    else {
+        Write-Host "  Git name:  $GitName (already configured)" -ForegroundColor DarkGray
+    }
     if (-not $GitEmail) {
         $GitEmail = Read-Host "Enter your GitHub email (for git config + SSH key)"
+    }
+    else {
+        Write-Host "  Git email: $GitEmail (already configured)" -ForegroundColor DarkGray
     }
 
     # Locate Git Bash (bash.exe). Try several common install locations + PATH.
@@ -132,11 +158,47 @@ if (-not $SkipPhase2) {
     if (-not $bashExe) {
         Write-Host ""
         Write-Host "  !! Git Bash not found. Phase 1 likely failed to install Git.Git." -ForegroundColor Red
-        Write-Host "  Attempting one last fallback: winget install Git.Git --force ..." -ForegroundColor Yellow
+        Write-Host "  Fallback 1: winget install Git.Git --force --ignore-security-hash ..." -ForegroundColor Yellow
         & winget install --id Git.Git --exact --silent --accept-package-agreements `
-            --accept-source-agreements --ignore-warnings --force --source winget 2>&1 |
+            --accept-source-agreements --ignore-warnings --force --ignore-security-hash --source winget 2>&1 |
             Tee-Object -FilePath (Join-Path $ScriptDir 'git-fallback-install.log') | Out-Null
         # Re-check
+        foreach ($c in $bashCandidates) {
+            if ($c -and (Test-Path $c)) { $bashExe = $c; break }
+        }
+    }
+
+    # Fallback 2: bypass winget entirely and download Git installer from git-scm.com.
+    if (-not $bashExe) {
+        Write-Host "  Fallback 2: downloading Git installer directly from git-scm.com ..." -ForegroundColor Yellow
+        try {
+            $api = Invoke-RestMethod -Uri 'https://api.github.com/repos/git-for-windows/git/releases/latest' `
+                -UseBasicParsing -Headers @{ 'User-Agent' = 'System-Setup' }
+            $asset = $api.assets | Where-Object {
+                $_.name -like '*-64-bit.exe' -and $_.name -notlike '*Portable*' -and $_.name -notlike '*MinGit*'
+            } | Select-Object -First 1
+            if ($asset) {
+                $installerPath = Join-Path $env:TEMP $asset.name
+                Write-Host "    downloading: $($asset.browser_download_url)" -ForegroundColor DarkGray
+                Invoke-WebRequest -Uri $asset.browser_download_url -OutFile $installerPath -UseBasicParsing
+                Write-Host "    running silent installer ..." -ForegroundColor DarkGray
+                $proc = Start-Process -FilePath $installerPath `
+                    -ArgumentList '/VERYSILENT', '/NORESTART', '/NOCANCEL', '/SP-', '/SUPPRESSMSGBOXES' `
+                    -Wait -PassThru
+                Write-Host "    installer exit code: $($proc.ExitCode)" -ForegroundColor DarkGray
+                Remove-Item $installerPath -ErrorAction SilentlyContinue
+            }
+            else {
+                Write-Warning "Could not find a Git installer asset on the latest release."
+            }
+        }
+        catch {
+            Write-Warning "Direct download fallback failed: $_"
+        }
+        # Refresh PATH again and re-check.
+        $machinePath = [Environment]::GetEnvironmentVariable('Path', 'Machine')
+        $userPath    = [Environment]::GetEnvironmentVariable('Path', 'User')
+        $env:Path = "$machinePath;$userPath"
         foreach ($c in $bashCandidates) {
             if ($c -and (Test-Path $c)) { $bashExe = $c; break }
         }
@@ -170,10 +232,15 @@ See the failure log: $ScriptDir\git-fallback-install.log
     # Tell bootstrap-dev.sh to skip Phase 1 -- we already did it.
     $env:SETUP_SKIP_PHASE1 = '1'
 
-    # Convert C:\foo\bar to /c/foo/bar for bash
-    $drive = $bootstrap.Substring(0, 1).ToLower()
-    $bootstrapPosix = '/' + $drive + ($bootstrap.Substring(2) -replace '\\', '/')
-    $bootstrapDirPosix = Split-Path -Parent $bootstrapPosix
+    # Convert C:\foo\bar to /c/foo/bar for bash.
+    # NOTE: do NOT use Split-Path here -- it uses the Windows separator and
+    # would mangle a forward-slash path back into backslashes.
+    function ConvertTo-PosixPath([string]$winPath) {
+        $d = $winPath.Substring(0, 1).ToLower()
+        return '/' + $d + ($winPath.Substring(2) -replace '\\', '/')
+    }
+    $bootstrapPosix    = ConvertTo-PosixPath $bootstrap
+    $bootstrapDirPosix = ConvertTo-PosixPath $ScriptDir
 
     # -c is enough; --login + -i would emit job-control warnings without a TTY.
     & $bashExe -c "cd '$bootstrapDirPosix' && bash '$bootstrapPosix'"

@@ -73,6 +73,21 @@ if (-not (Test-Path $wingetJson)) {
     exit 1
 }
 
+# --- Refresh winget sources ------------------------------
+# A stale or corrupt source cache is the #1 cause of mysterious package
+# install failures (hash mismatches, "package not found", random hex codes).
+# Reset + update once at the top so every run starts from a known-good state.
+Write-Host "Refreshing winget sources (reset + update)..." -ForegroundColor Cyan
+try {
+    & winget source reset --force *>&1 | Out-Null
+    & winget source update *>&1 | Out-Null
+    Write-Host "  Sources refreshed." -ForegroundColor DarkGray
+}
+catch {
+    Write-Warning "winget source refresh failed (continuing anyway): $_"
+}
+Write-Host ""
+
 # --- Parse package list --------------------------
 try {
     $json = Get-Content $wingetJson -Raw | ConvertFrom-Json

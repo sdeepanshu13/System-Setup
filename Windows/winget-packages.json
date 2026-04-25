@@ -107,9 +107,6 @@
                     "PackageIdentifier": "Canonical.Ubuntu.2404"
                 },
                 {
-                    "PackageIdentifier": "Microsoft.DotNet.Framework.DeveloperPack.4.6"
-                },
-                {
                     "PackageIdentifier": "Microsoft.DotNet.Framework.DeveloperPack_4"
                 },
                 {
@@ -144,9 +141,6 @@
                 },
                 {
                     "PackageIdentifier": "Microsoft.CLRTypesSQLServer.2019"
-                },
-                {
-                    "PackageIdentifier": "Microsoft.GlobalSecureAccessClient"
                 },
                 {
                     "PackageIdentifier": "Microsoft.RemoteHelp"

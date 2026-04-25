@@ -144,6 +144,42 @@
                 },
                 {
                     "PackageIdentifier": "Microsoft.RemoteHelp"
+                },
+                {
+                    "PackageIdentifier": "EclipseAdoptium.Temurin.21.JDK"
+                },
+                {
+                    "PackageIdentifier": "EclipseAdoptium.Temurin.17.JDK"
+                },
+                {
+                    "PackageIdentifier": "Apache.Maven"
+                },
+                {
+                    "PackageIdentifier": "Gradle.Gradle"
+                },
+                {
+                    "PackageIdentifier": "OpenJS.NodeJS.LTS"
+                },
+                {
+                    "PackageIdentifier": "GoLang.Go"
+                },
+                {
+                    "PackageIdentifier": "Rustlang.Rustup"
+                },
+                {
+                    "PackageIdentifier": "LLVM.LLVM"
+                },
+                {
+                    "PackageIdentifier": "MartinStorsjo.LLVM-MinGW.UCRT"
+                },
+                {
+                    "PackageIdentifier": "Kitware.CMake"
+                },
+                {
+                    "PackageIdentifier": "Ninja-build.Ninja"
+                },
+                {
+                    "PackageIdentifier": "Microsoft.VisualStudio.2022.BuildTools"
                 }
             ],
             "SourceDetails": {

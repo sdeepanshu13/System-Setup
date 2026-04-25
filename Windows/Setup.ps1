@@ -95,6 +95,16 @@ else {
     Write-Host "Skipping Phase 1 (winget install)." -ForegroundColor Yellow
 }
 
+# --- Phase 1b: Windows Optional Features -----------------
+if (-not $SkipPhase1) {
+    $featuresScript = Join-Path $ScriptDir 'Enable-WindowsFeatures.ps1'
+    if (Test-Path $featuresScript) {
+        Write-Host ""
+        Write-Host "Phase 1b: Enabling Windows Optional Features (WSL, Hyper-V, Containers, Sandbox, .NET)..." -ForegroundColor Cyan
+        & $featuresScript
+    }
+}
+
 # --- Phase 2: bootstrap-dev.sh via Git Bash --------------
 if (-not $SkipPhase2) {
     Write-Host ""

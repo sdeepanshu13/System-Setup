@@ -354,12 +354,15 @@ GIT_ROOT_POSIX="$(find_git_root 2>/dev/null || true)"
 if [[ -f "$WT_SETTINGS_PATH" && -n "$GIT_ROOT_POSIX" ]]; then
     GIT_ROOT_WIN="$(cygpath -w "$GIT_ROOT_POSIX")"
     WIN_WT_PATH="$(cygpath -w "$WT_SETTINGS_PATH")"
-    echo "🖥️  Configuring Windows Terminal (Git Bash profile + default + font)..."
+    echo "🖥️  Configuring Windows Terminal (Git Bash profile + default + font + elevate)..."
     powershell.exe -NoProfile -ExecutionPolicy Bypass -Command "
         \$path = '$WIN_WT_PATH'
         \$gitDir = '$GIT_ROOT_WIN'
-        # Backup once per run
-        Copy-Item \$path (\$path + '.backup.' + (Get-Date -Format 'yyyyMMddHHmmss')) -ErrorAction SilentlyContinue
+        # One-time backup (don't pile up a backup per run).
+        \$backup = \$path + '.systemsetup.backup'
+        if (-not (Test-Path \$backup)) {
+            Copy-Item \$path \$backup -ErrorAction SilentlyContinue
+        }
 
         \$s = Get-Content \$path -Raw | ConvertFrom-Json
         if (-not \$s.profiles) { \$s | Add-Member -NotePropertyName profiles -NotePropertyValue ([PSCustomObject]@{ defaults = [PSCustomObject]@{}; list = @() }) -Force }
@@ -372,24 +375,32 @@ if [[ -f "$WT_SETTINGS_PATH" && -n "$GIT_ROOT_POSIX" ]]; then
         \$bashExe = Join-Path \$gitDir 'bin\\bash.exe'
         \$icon    = Join-Path \$gitDir 'mingw64\\share\\git\\git-for-windows.ico'
         \$gitBashGuid = '{00000000-0000-0000-ba54-000000000001}'
+        # Use single quotes inside the JSON-bound string -- Windows accepts
+        # them around a path with spaces and we avoid backslash-escaping.
+        \$cmdLine = '\"' + \$bashExe + '\" --login -i'
 
         \$existing = \$s.profiles.list | Where-Object { \$_.name -eq 'Git Bash' -or \$_.guid -eq \$gitBashGuid }
         if (\$existing) {
-            \$existing.guid              = \$gitBashGuid
-            \$existing.commandline       = ('\"' + \$bashExe + '\" --login -i')
-            \$existing.icon              = \$icon
-            \$existing.startingDirectory = '%USERPROFILE%'
-            Write-Host '  Updated existing Git Bash profile.'
+            \$existing | Add-Member -NotePropertyName guid              -NotePropertyValue \$gitBashGuid -Force
+            \$existing | Add-Member -NotePropertyName name              -NotePropertyValue 'Git Bash'   -Force
+            \$existing | Add-Member -NotePropertyName commandline       -NotePropertyValue \$cmdLine    -Force
+            \$existing | Add-Member -NotePropertyName icon              -NotePropertyValue \$icon       -Force
+            \$existing | Add-Member -NotePropertyName startingDirectory -NotePropertyValue '%USERPROFILE%' -Force
+            \$existing | Add-Member -NotePropertyName elevate           -NotePropertyValue \$true       -Force
+            Write-Host '  Updated existing Git Bash profile (elevate=true).'
         } else {
             \$gb = [PSCustomObject]@{
                 guid              = \$gitBashGuid
                 name              = 'Git Bash'
-                commandline       = ('\"' + \$bashExe + '\" --login -i')
+                commandline       = \$cmdLine
                 icon              = \$icon
                 startingDirectory = '%USERPROFILE%'
+                elevate           = \$true
             }
-            \$s.profiles.list += \$gb
-            Write-Host '  Added Git Bash profile.'
+            # Force list to a real array before appending.
+            \$listArr = @(\$s.profiles.list) + \$gb
+            \$s.profiles.list = \$listArr
+            Write-Host '  Added Git Bash profile (elevate=true).'
         }
 
         # Make Git Bash the default profile
@@ -489,6 +500,112 @@ else
     echo "⚠️  nvm not found — skipping Node.js. Install via winget (CoreyButler.NVMforWindows)."
 fi
 set -e
+
+# ---------------------------
+# 10b) Install global npm packages (React, TS, linters, common CLIs)
+# ---------------------------
+echo "📦 Installing global npm packages..."
+set +e
+if command -v npm >/dev/null 2>&1; then
+    NPM_GLOBALS=(
+        yarn
+        pnpm
+        typescript
+        ts-node
+        eslint
+        prettier
+        nodemon
+        serve
+        create-react-app
+        create-next-app
+        create-vite
+        vercel
+        wrangler
+        npm-check-updates
+    )
+    for pkg in "${NPM_GLOBALS[@]}"; do
+        if npm list -g --depth=0 "$pkg" >/dev/null 2>&1; then
+            echo "  [skip] $pkg (already installed)"
+        else
+            echo "  [..]   $pkg"
+            npm install -g "$pkg" >/dev/null 2>&1 \
+                && echo "  [ok]   $pkg" \
+                || echo "  [fail] $pkg"
+        fi
+    done
+else
+    echo "⚠️  npm not found -- skipping global npm packages."
+fi
+set -e
+
+# ---------------------------
+# 10c) Install global Python tools (via pipx if available, else pip --user)
+# ---------------------------
+echo "🐍 Installing global Python tools..."
+set +e
+PYBIN=""
+for cand in python python3 py; do
+    if command -v "$cand" >/dev/null 2>&1; then PYBIN="$cand"; break; fi
+done
+if [[ -n "$PYBIN" ]]; then
+    "$PYBIN" -m pip install --user --upgrade pip pipx >/dev/null 2>&1
+    "$PYBIN" -m pipx ensurepath >/dev/null 2>&1 || true
+    PIPX_TOOLS=(uv ruff black httpie poetry virtualenv)
+    for tool in "${PIPX_TOOLS[@]}"; do
+        if "$PYBIN" -m pipx list 2>/dev/null | grep -q "package $tool "; then
+            echo "  [skip] $tool (already installed)"
+        else
+            echo "  [..]   $tool"
+            "$PYBIN" -m pipx install "$tool" >/dev/null 2>&1 \
+                && echo "  [ok]   $tool" \
+                || echo "  [fail] $tool"
+        fi
+    done
+else
+    echo "⚠️  python not found -- skipping pipx tools."
+fi
+set -e
+
+# ---------------------------
+# 10d) Initialize Rust toolchain (rustup install stable)
+# ---------------------------
+echo "🦀 Configuring Rust toolchain..."
+set +e
+if command -v rustup >/dev/null 2>&1; then
+    if ! rustup toolchain list 2>/dev/null | grep -q stable; then
+        rustup toolchain install stable >/dev/null 2>&1 \
+            && echo "  [ok] stable toolchain installed" \
+            || echo "  [fail] rustup toolchain install"
+    else
+        echo "  [skip] stable toolchain already installed"
+    fi
+    rustup default stable >/dev/null 2>&1
+    rustup component add rustfmt clippy rust-analyzer >/dev/null 2>&1
+else
+    echo "⚠️  rustup not found -- skipping (winget Rustlang.Rustup)."
+fi
+set -e
+
+# ---------------------------
+# 10e) Configure Go workspace
+# ---------------------------
+echo "🐹 Configuring Go..."
+set +e
+if command -v go >/dev/null 2>&1; then
+    mkdir -p "$HOME/go/bin" "$HOME/go/src" "$HOME/go/pkg"
+    go env -w GOPATH="$HOME/go" >/dev/null 2>&1
+    echo "  [ok] GOPATH=$HOME/go"
+else
+    echo "⚠️  go not found -- skipping (winget GoLang.Go)."
+fi
+set -e
+
+# ---------------------------
+# 10f) Java (verify only -- JDK installed by winget)
+# ---------------------------
+if command -v java >/dev/null 2>&1; then
+    echo "☕ Java: $(java -version 2>&1 | head -n1)"
+fi
 
 # ---------------------------
 # 11) (Reserved) Windows Terminal font is configured in section 8.

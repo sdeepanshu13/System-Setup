@@ -95,6 +95,39 @@ if ($packages.Count -eq 0) {
     exit 1
 }
 
+# ─── Pre-flight: skip already-installed packages ─────────
+Write-Host "Checking for already-installed packages..." -ForegroundColor Cyan
+$installedSnapshot = winget list --source winget --accept-source-agreements 2>$null | Out-String
+$alreadyInstalled = @()
+$toInstall = @()
+foreach ($pkg in $packages) {
+    if ($installedSnapshot -match [regex]::Escape($pkg)) {
+        $alreadyInstalled += $pkg
+    }
+    else {
+        $toInstall += $pkg
+    }
+}
+Write-Host ("  Already installed: {0}" -f $alreadyInstalled.Count) -ForegroundColor DarkGray
+Write-Host ("  To install:        {0}" -f $toInstall.Count) -ForegroundColor Yellow
+if ($alreadyInstalled.Count -gt 0) {
+    $alreadyInstalled | ForEach-Object { Write-Host "    [skip] $_" -ForegroundColor DarkGray }
+}
+Write-Host ""
+
+if ($toInstall.Count -eq 0) {
+    Write-Host "Nothing to install — all packages already present." -ForegroundColor Green
+    try { Stop-Transcript | Out-Null } catch { }
+    if ($Host.Name -eq 'ConsoleHost' -and -not $env:WT_SESSION) {
+        Write-Host "Press Enter to exit..." -ForegroundColor DarkGray
+        [void][System.Console]::ReadLine()
+    }
+    exit 0
+}
+
+# Replace $packages with the filtered list for the rest of the script.
+$packages = $toInstall
+
 Write-Host "=============================================" -ForegroundColor Cyan
 Write-Host " Windows Software Restore" -ForegroundColor Cyan
 Write-Host "=============================================" -ForegroundColor Cyan

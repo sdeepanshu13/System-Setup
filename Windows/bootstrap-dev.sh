@@ -326,7 +326,7 @@ deploy_dotfile "$ZSHRC_SRC" ".zshrc"
 deploy_dotfile "$P10K_SRC"  ".p10k.zsh"
 
 # ---------------------------
-# 8) Add Git Bash profile to Windows Terminal
+# 8) Add Git Bash profile to Windows Terminal & make it default
 # ---------------------------
 WT_SETTINGS_PATH="$HOME/AppData/Local/Packages/Microsoft.WindowsTerminal_8wekyb3d8bbwe/LocalState/settings.json"
 GIT_ROOT_POSIX="$(find_git_root 2>/dev/null || true)"
@@ -334,30 +334,53 @@ GIT_ROOT_POSIX="$(find_git_root 2>/dev/null || true)"
 if [[ -f "$WT_SETTINGS_PATH" && -n "$GIT_ROOT_POSIX" ]]; then
     GIT_ROOT_WIN="$(cygpath -w "$GIT_ROOT_POSIX")"
     WIN_WT_PATH="$(cygpath -w "$WT_SETTINGS_PATH")"
-    echo "🖥️  Adding 'Git Bash' profile to Windows Terminal..."
+    echo "🖥️  Configuring Windows Terminal (Git Bash profile + default + font)..."
     powershell.exe -NoProfile -ExecutionPolicy Bypass -Command "
         \$path = '$WIN_WT_PATH'
+        \$gitDir = '$GIT_ROOT_WIN'
+        # Backup once per run
+        Copy-Item \$path (\$path + '.backup.' + (Get-Date -Format 'yyyyMMddHHmmss')) -ErrorAction SilentlyContinue
+
         \$s = Get-Content \$path -Raw | ConvertFrom-Json
+        if (-not \$s.profiles) { \$s | Add-Member -NotePropertyName profiles -NotePropertyValue ([PSCustomObject]@{ defaults = [PSCustomObject]@{}; list = @() }) -Force }
         if (-not \$s.profiles.list) { \$s.profiles | Add-Member -NotePropertyName list -NotePropertyValue @() -Force }
-        \$existing = \$s.profiles.list | Where-Object { \$_.name -eq 'Git Bash' }
-        if (-not \$existing) {
-            \$gitDir = '$GIT_ROOT_WIN'
-            \$bashExe = Join-Path \$gitDir 'bin\\bash.exe'
-            \$icon    = Join-Path \$gitDir 'mingw64\\share\\git\\git-for-windows.ico'
+        if (-not \$s.profiles.defaults) { \$s.profiles | Add-Member -NotePropertyName defaults -NotePropertyValue ([PSCustomObject]@{}) -Force }
+
+        # Apply MesloLGS NF font to all profiles via defaults
+        \$s.profiles.defaults | Add-Member -NotePropertyName font -NotePropertyValue ([PSCustomObject]@{ face = 'MesloLGS NF'; size = 11 }) -Force
+
+        \$bashExe = Join-Path \$gitDir 'bin\\bash.exe'
+        \$icon    = Join-Path \$gitDir 'mingw64\\share\\git\\git-for-windows.ico'
+        \$gitBashGuid = '{00000000-0000-0000-ba54-000000000001}'
+
+        \$existing = \$s.profiles.list | Where-Object { \$_.name -eq 'Git Bash' -or \$_.guid -eq \$gitBashGuid }
+        if (\$existing) {
+            \$existing.guid              = \$gitBashGuid
+            \$existing.commandline       = ('\"' + \$bashExe + '\" --login -i')
+            \$existing.icon              = \$icon
+            \$existing.startingDirectory = '%USERPROFILE%'
+            Write-Host '  Updated existing Git Bash profile.'
+        } else {
             \$gb = [PSCustomObject]@{
+                guid              = \$gitBashGuid
                 name              = 'Git Bash'
                 commandline       = ('\"' + \$bashExe + '\" --login -i')
                 icon              = \$icon
                 startingDirectory = '%USERPROFILE%'
-                font              = @{ face = 'MesloLGS NF'; size = 11 }
             }
             \$s.profiles.list += \$gb
-            \$s | ConvertTo-Json -Depth 32 | Set-Content \$path -Encoding UTF8
             Write-Host '  Added Git Bash profile.'
-        } else {
-            Write-Host '  Git Bash profile already present.'
         }
-    " 2>/dev/null || echo "  ⚠️  Could not update Windows Terminal settings automatically."
+
+        # Make Git Bash the default profile
+        \$s | Add-Member -NotePropertyName defaultProfile -NotePropertyValue \$gitBashGuid -Force
+        Write-Host '  Set Git Bash as default profile.'
+
+        \$s | ConvertTo-Json -Depth 32 | Set-Content \$path -Encoding UTF8
+    " 2>&1 || echo "  ⚠️  Could not update Windows Terminal settings automatically."
+else
+    [[ ! -f "$WT_SETTINGS_PATH" ]] && echo "ℹ️  Windows Terminal not installed — skipping profile setup."
+    [[ -z "$GIT_ROOT_POSIX" ]]      && echo "ℹ️  Git for Windows not found — skipping profile setup."
 fi
 
 # ---------------------------

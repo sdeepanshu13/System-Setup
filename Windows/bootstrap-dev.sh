@@ -14,7 +14,8 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ZSHRC_SRC="$SCRIPT_DIR/zshrc-template"
-ZSH_CUSTOM_DIR="$HOME/.oh-my-zsh/custom"
+P10K_SRC="$SCRIPT_DIR/p10k-template"
+ZSH_BUNDLE="$SCRIPT_DIR/zsh-gitbash.tar.gz"
 
 # Helper: clone a git repo only if the target dir doesn't exist
 clone_if_missing() {
@@ -43,57 +44,59 @@ detect_environment() {
     fi
 }
 
-# Install zsh in Git Bash (MSYS2/MINGW)
+# Locate Git for Windows install root (where bash.exe lives in /usr/bin)
+find_git_root() {
+    for c in "/c/Program Files/Git" "/c/Program Files (x86)/Git"; do
+        if [[ -x "$c/usr/bin/bash.exe" ]]; then
+            echo "$c"
+            return 0
+        fi
+    done
+    return 1
+}
+
+# Install zsh into Git Bash by extracting the bundled tarball.
 install_zsh_gitbash() {
-    echo "📦 Installing zsh for Git Bash..."
-    # Try pacman first (Git for Windows SDK / full MSYS2)
-    if command -v pacman &>/dev/null; then
-        pacman -S --noconfirm zsh 2>/dev/null && return 0
+    if command -v zsh &>/dev/null; then
+        echo "✅ zsh already installed: $(zsh --version | head -1)"
+        return 0
     fi
 
-    # Download from MSYS2 repository
-    local TEMP_DIR
-    TEMP_DIR=$(mktemp -d)
-    local ZSH_URL="https://mirror.msys2.org/msys/x86_64/zsh-5.9-2-x86_64.pkg.tar.zst"
-    echo "  ⬇️  Downloading zsh package..."
-    curl -fsSL -o "$TEMP_DIR/zsh.pkg.tar.zst" "$ZSH_URL" || {
-        echo "❌ Failed to download zsh package."
-        rm -rf "$TEMP_DIR"
+    if [[ ! -f "$ZSH_BUNDLE" ]]; then
+        echo "❌ zsh-gitbash.tar.gz not found at $ZSH_BUNDLE"
+        return 1
+    fi
+
+    local GIT_ROOT
+    GIT_ROOT="$(find_git_root)" || {
+        echo "❌ Git for Windows not found. Install Git first (winget install Git.Git)."
         return 1
     }
 
-    # Extract using available tools
-    cd "$TEMP_DIR" || return 1
-    if command -v zstd &>/dev/null; then
-        zstd -d zsh.pkg.tar.zst -o zsh.pkg.tar && tar xf zsh.pkg.tar
-    elif tar --zstd -xf zsh.pkg.tar.zst 2>/dev/null; then
-        : # tar with built-in zstd worked
-    else
-        echo "❌ Cannot extract zsh package (no zstd support)."
-        echo "   Install zsh manually: https://packages.msys2.org/package/zsh"
-        cd - > /dev/null
-        rm -rf "$TEMP_DIR"
-        return 1
-    fi
-
-    # Copy to Git Bash root (requires write access to Git install dir)
-    if [[ -d "$TEMP_DIR/usr" ]]; then
-        cp -rf "$TEMP_DIR/usr/"* / 2>/dev/null || {
-            echo "⚠️  Permission denied. Re-run Git Bash as Administrator."
-            cd - > /dev/null
-            rm -rf "$TEMP_DIR"
+    echo "📦 Installing zsh into $GIT_ROOT (extracting $ZSH_BUNDLE)..."
+    # Try writing directly; if denied, retry elevated via PowerShell.
+    if ! tar -xzf "$ZSH_BUNDLE" -C "$GIT_ROOT" 2>/dev/null; then
+        echo "  Permission denied — re-extracting elevated..."
+        local WIN_BUNDLE WIN_GIT
+        WIN_BUNDLE="$(cygpath -w "$ZSH_BUNDLE")"
+        WIN_GIT="$(cygpath -w "$GIT_ROOT")"
+        powershell.exe -NoProfile -ExecutionPolicy Bypass -Command "
+            Start-Process -FilePath 'tar.exe' -Verb RunAs -Wait -ArgumentList @(
+                '-xzf', '$WIN_BUNDLE', '-C', '$WIN_GIT'
+            )
+        " 2>/dev/null || {
+            echo "❌ Failed to extract zsh bundle. Run Git Bash as Administrator."
             return 1
         }
     fi
 
-    cd - > /dev/null
-    rm -rf "$TEMP_DIR"
-
+    # Refresh PATH so the just-installed zsh is visible in this session
+    hash -r 2>/dev/null || true
     if command -v zsh &>/dev/null; then
-        echo "✅ zsh installed: $(zsh --version)"
+        echo "✅ zsh installed: $(zsh --version | head -1)"
         return 0
     fi
-    echo "❌ zsh installation failed."
+    echo "❌ zsh installation failed (binary not found after extract)."
     return 1
 }
 
@@ -210,28 +213,31 @@ echo "🔧 Phase 3: Shell & dotfiles setup"
 echo ""
 
 # ---------------------------
-# 3) Ensure zsh is available
+# 3) Install zsh into Git Bash (from bundled tarball)
 # ---------------------------
 ZSH_AVAILABLE=true
-if ! command -v zsh &>/dev/null; then
-    if [[ "$ENV_TYPE" == "gitbash" ]]; then
-        install_zsh_gitbash || ZSH_AVAILABLE=false
-    else
-        echo "⚠️  zsh not found — skipping zsh-related setup."
-        ZSH_AVAILABLE=false
-    fi
+ZSH_HOME="$HOME"   # Git Bash's home == %USERPROFILE%
+
+if [[ "$ENV_TYPE" == "gitbash" ]]; then
+    install_zsh_gitbash || ZSH_AVAILABLE=false
+elif command -v zsh &>/dev/null; then
+    : # zsh already on PATH (Linux/macOS/WSL)
+else
+    echo "⚠️  zsh not found and not in Git Bash — skipping zsh-related setup."
+    ZSH_AVAILABLE=false
 fi
 
 if $ZSH_AVAILABLE; then
+    ZSH_CUSTOM_DIR="$ZSH_HOME/.oh-my-zsh/custom"
 
 # ---------------------------
 # 4) Install Oh My Zsh
 # ---------------------------
-if [[ -d "$HOME/.oh-my-zsh" ]]; then
-    echo "✅ Oh My Zsh already installed, skipping."
+if [[ -d "$ZSH_HOME/.oh-my-zsh" ]]; then
+    echo "✅ Oh My Zsh already installed at $ZSH_HOME/.oh-my-zsh"
 else
-    echo "📦 Installing Oh My Zsh..."
-    RUNZSH=no KEEP_ZSHRC=yes \
+    echo "📦 Installing Oh My Zsh into $ZSH_HOME..."
+    RUNZSH=no KEEP_ZSHRC=yes ZSH="$ZSH_HOME/.oh-my-zsh" \
       sh -c "$(curl -fsSL https://raw.githubusercontent.com/ohmyzsh/ohmyzsh/master/tools/install.sh)" "" --unattended
     echo "✅ Oh My Zsh installed."
 fi
@@ -298,28 +304,70 @@ echo "✅ MesloLGS Nerd Font done."
 if $ZSH_AVAILABLE; then
 
 # ---------------------------
-# 7) Deploy optimized .zshrc
+# 7) Deploy .zshrc and .p10k.zsh
 # ---------------------------
-echo "📝 Setting up .zshrc..."
-if [[ ! -f "$ZSHRC_SRC" ]]; then
-    echo "❌ zshrc-template not found at $ZSHRC_SRC — skipping."
-else
-    if [[ -f "$HOME/.zshrc" ]]; then
-        cp "$HOME/.zshrc" "$HOME/.zshrc.backup.$(date +%Y%m%d%H%M%S)"
-        echo "  Backed up existing .zshrc"
+echo "📝 Deploying zsh dotfiles into $ZSH_HOME..."
+
+deploy_dotfile() {
+    local src="$1" name="$2"
+    if [[ ! -f "$src" ]]; then
+        echo "  ⚠️  $name template not found at $src — skipping."
+        return
     fi
-    cp "$ZSHRC_SRC" "$HOME/.zshrc"
-    echo "✅ .zshrc deployed from template."
+    if [[ -f "$ZSH_HOME/$name" ]] && ! cmp -s "$src" "$ZSH_HOME/$name"; then
+        cp "$ZSH_HOME/$name" "$ZSH_HOME/$name.backup.$(date +%Y%m%d%H%M%S)"
+        echo "  Backed up existing $name"
+    fi
+    cp "$src" "$ZSH_HOME/$name"
+    echo "  ✅ $name deployed."
+}
+
+deploy_dotfile "$ZSHRC_SRC" ".zshrc"
+deploy_dotfile "$P10K_SRC"  ".p10k.zsh"
+
+# ---------------------------
+# 8) Add Git Bash profile to Windows Terminal
+# ---------------------------
+WT_SETTINGS_PATH="$HOME/AppData/Local/Packages/Microsoft.WindowsTerminal_8wekyb3d8bbwe/LocalState/settings.json"
+GIT_ROOT_POSIX="$(find_git_root 2>/dev/null || true)"
+
+if [[ -f "$WT_SETTINGS_PATH" && -n "$GIT_ROOT_POSIX" ]]; then
+    GIT_ROOT_WIN="$(cygpath -w "$GIT_ROOT_POSIX")"
+    WIN_WT_PATH="$(cygpath -w "$WT_SETTINGS_PATH")"
+    echo "🖥️  Adding 'Git Bash' profile to Windows Terminal..."
+    powershell.exe -NoProfile -ExecutionPolicy Bypass -Command "
+        \$path = '$WIN_WT_PATH'
+        \$s = Get-Content \$path -Raw | ConvertFrom-Json
+        if (-not \$s.profiles.list) { \$s.profiles | Add-Member -NotePropertyName list -NotePropertyValue @() -Force }
+        \$existing = \$s.profiles.list | Where-Object { \$_.name -eq 'Git Bash' }
+        if (-not \$existing) {
+            \$gitDir = '$GIT_ROOT_WIN'
+            \$bashExe = Join-Path \$gitDir 'bin\\bash.exe'
+            \$icon    = Join-Path \$gitDir 'mingw64\\share\\git\\git-for-windows.ico'
+            \$gb = [PSCustomObject]@{
+                name              = 'Git Bash'
+                commandline       = ('\"' + \$bashExe + '\" --login -i')
+                icon              = \$icon
+                startingDirectory = '%USERPROFILE%'
+                font              = @{ face = 'MesloLGS NF'; size = 11 }
+            }
+            \$s.profiles.list += \$gb
+            \$s | ConvertTo-Json -Depth 32 | Set-Content \$path -Encoding UTF8
+            Write-Host '  Added Git Bash profile.'
+        } else {
+            Write-Host '  Git Bash profile already present.'
+        }
+    " 2>/dev/null || echo "  ⚠️  Could not update Windows Terminal settings automatically."
 fi
 
 # ---------------------------
-# 8) Make zsh default in Git Bash
+# 8b) Make zsh auto-launch from Git Bash
 # ---------------------------
 if [[ "$ENV_TYPE" == "gitbash" ]]; then
-    echo "🔧 Setting zsh as default shell in Git Bash..."
+    echo "🔧 Configuring Git Bash to auto-launch zsh..."
     BASHRC="$HOME/.bashrc"
-
-    if [[ -f "$BASHRC" ]] && grep -q 'exec zsh' "$BASHRC" 2>/dev/null; then
+    MARKER='# >>> System-Setup: launch zsh >>>'
+    if [[ -f "$BASHRC" ]] && grep -qF "$MARKER" "$BASHRC" 2>/dev/null; then
         echo "✅ .bashrc already launches zsh."
     else
         if [[ -f "$BASHRC" ]]; then
@@ -328,19 +376,22 @@ if [[ "$ENV_TYPE" == "gitbash" ]]; then
         fi
         cat >> "$BASHRC" << 'BASH_EOF'
 
-# Auto-start zsh
-if [ -t 1 ] && [ -z "$ZSH_VERSION" ]; then
-  exec zsh
+# >>> System-Setup: launch zsh >>>
+# Force UTF-8 codepage so zsh / p10k glyphs render correctly
+/c/Windows/System32/chcp.com 65001 > /dev/null 2>&1
+# Auto-launch zsh in interactive sessions
+if [ -t 1 ] && [ -z "$ZSH_VERSION" ] && command -v zsh >/dev/null 2>&1; then
+    exec zsh
 fi
+# <<< System-Setup: launch zsh <<<
 BASH_EOF
-        echo "✅ .bashrc configured to launch zsh."
+        echo "✅ .bashrc configured to launch zsh + UTF-8 codepage."
     fi
 fi
 
 else
     echo ""
     echo "⚠️  Skipping zsh setup (zsh not available)."
-    echo "   Install zsh and re-run for Oh My Zsh, Powerlevel10k, and .zshrc config."
 fi  # end ZSH_AVAILABLE (sections 7-8)
 
 # ---------------------------

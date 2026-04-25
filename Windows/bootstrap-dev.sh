@@ -110,9 +110,12 @@ echo "🔍 Detected environment: $ENV_TYPE"
 RESTORE_PS1="$SCRIPT_DIR/restore.ps1"
 if [[ -f "$RESTORE_PS1" ]]; then
     echo ""
-    echo "📦 Phase 1: Installing software via winget..."
+    echo "📦 Phase 1: Installing software via winget (parallel, unattended)..."
     WIN_RESTORE="$(cygpath -w "$RESTORE_PS1")"
-    powershell.exe -NoProfile -ExecutionPolicy Bypass -File "$WIN_RESTORE" || true
+    # Run elevated PowerShell so per-package UAC prompts are suppressed.
+    # Override parallelism with: WINGET_THROTTLE=8 ./bootstrap-dev.sh
+    THROTTLE="${WINGET_THROTTLE:-5}"
+    powershell.exe -NoProfile -ExecutionPolicy Bypass -File "$WIN_RESTORE" -Throttle "$THROTTLE" || true
     echo ""
     echo "✅ Phase 1 complete."
     echo ""

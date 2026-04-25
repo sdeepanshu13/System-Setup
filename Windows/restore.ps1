@@ -238,17 +238,42 @@ else {
     Write-Host ""
 
     # -- Phase A: Priority packages (Git + Terminal first, sequential) --
+    # NOTE: priority packages are installed WITHOUT --disable-interactivity.
+    # The Git installer in particular sometimes aborts when interactivity is
+    # fully disabled (it tries to write to the registry / refresh PATH and
+    # winget kills it). We're already elevated, so the only "prompts" winget
+    # would suppress are progress bars -- safe to allow.
+    $priorityArgs = @(
+        '--silent',
+        '--accept-package-agreements',
+        '--accept-source-agreements',
+        '--ignore-warnings',
+        '--force',
+        '--source', 'winget'
+    )
     if ($priorityToInstall.Count -gt 0) {
         Write-Host "Phase A: Installing priority packages first (Git + Terminal)..." -ForegroundColor Cyan
         foreach ($pkg in $priorityToInstall) {
             $log = Join-Path $logDir ((($pkg -replace '[^A-Za-z0-9._-]', '_')) + '.log')
             Write-Host ("  -> installing: $pkg") -ForegroundColor DarkGray
-            $wgArgs = @('install', '--id', $pkg, '--exact') + $commonArgs
+            $wgArgs = @('install', '--id', $pkg, '--exact') + $priorityArgs
             & winget @wgArgs *>&1 | Tee-Object -FilePath $log | Out-Null
             $code = $LASTEXITCODE
+
+            # Retry once with the full common args if the friendly attempt failed.
+            if ($code -ne 0) {
+                Write-Host ("     retry: $pkg (with --disable-interactivity)") -ForegroundColor DarkYellow
+                $wgArgs = @('install', '--id', $pkg, '--exact') + $commonArgs + @('--force')
+                & winget @wgArgs *>&1 | Tee-Object -FilePath $log -Append | Out-Null
+                $code = $LASTEXITCODE
+            }
+
             $status = if ($code -eq 0) { 'OK    ' } else { "FAIL($code)" }
-            $color  = if ($code -eq 0) { 'Green' } else { 'Yellow' }
+            $color  = if ($code -eq 0) { 'Green' } else { 'Red' }
             Write-Host ("     {0} {1}" -f $status, $pkg) -ForegroundColor $color
+            if ($code -ne 0) {
+                Write-Host ("        log: $log") -ForegroundColor DarkGray
+            }
         }
         Write-Host ""
     }
@@ -359,7 +384,13 @@ else {
         $failed | ForEach-Object { Write-Host "    - $_" -ForegroundColor Red }
         Write-Host ""
         Write-Host "  To retry failed packages individually:" -ForegroundColor Yellow
-        $failed | ForEach-Object { Write-Host "    winget install --id $_ --accept-package-agreements" -ForegroundColor DarkGray }
+        $failed | ForEach-Object {
+            Write-Host ("    winget install --id $_ --accept-package-agreements --force") -ForegroundColor DarkGray
+            $logFile = Join-Path (Join-Path $RunLogDir 'packages') ((($_ -replace '[^A-Za-z0-9._-]', '_')) + '.log')
+            if (Test-Path $logFile) {
+                Write-Host ("      log: $logFile") -ForegroundColor DarkGray
+            }
+        }
     }
     else {
         Write-Host "  All packages installed successfully!" -ForegroundColor Green

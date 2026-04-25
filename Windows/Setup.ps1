@@ -120,12 +120,40 @@ if (-not $SkipPhase2) {
         if ($c -and (Test-Path $c)) { $bashExe = $c; break }
     }
     if (-not $bashExe) {
+        # Refresh PATH from the registry -- Git was just installed by Phase 1
+        # but our process inherited the pre-install PATH.
+        $machinePath = [Environment]::GetEnvironmentVariable('Path', 'Machine')
+        $userPath    = [Environment]::GetEnvironmentVariable('Path', 'User')
+        $env:Path = "$machinePath;$userPath"
         $cmd = Get-Command bash.exe -ErrorAction SilentlyContinue
         if ($cmd) { $bashExe = $cmd.Source }
     }
 
     if (-not $bashExe) {
-        Write-Error "Git Bash not found. Install Git for Windows (winget install Git.Git) and rerun with -SkipPhase1."
+        Write-Host ""
+        Write-Host "  !! Git Bash not found. Phase 1 likely failed to install Git.Git." -ForegroundColor Red
+        Write-Host "  Attempting one last fallback: winget install Git.Git --force ..." -ForegroundColor Yellow
+        & winget install --id Git.Git --exact --silent --accept-package-agreements `
+            --accept-source-agreements --ignore-warnings --force --source winget 2>&1 |
+            Tee-Object -FilePath (Join-Path $ScriptDir 'git-fallback-install.log') | Out-Null
+        # Re-check
+        foreach ($c in $bashCandidates) {
+            if ($c -and (Test-Path $c)) { $bashExe = $c; break }
+        }
+    }
+
+    if (-not $bashExe) {
+        Write-Error @"
+Git Bash still not found. Phase 2 cannot proceed.
+
+To fix manually:
+  1. Install Git for Windows: https://git-scm.com/download/win
+     OR: winget install --id Git.Git --force
+  2. Re-run this script with -SkipPhase1:
+     .\Setup.ps1 -SkipPhase1
+
+See the failure log: $ScriptDir\git-fallback-install.log
+"@
         exit 1
     }
     Write-Host "  Using bash: $bashExe" -ForegroundColor DarkGray

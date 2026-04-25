@@ -113,10 +113,43 @@ if ($packages.Count -eq 0) {
 # --- Pre-flight: skip already-installed packages ---------
 Write-Host "Checking for already-installed packages..." -ForegroundColor Cyan
 $installedSnapshot = winget list --source winget --accept-source-agreements 2>$null | Out-String
+
+# Some packages are installed by tools other than winget (Git for Windows from
+# its own installer, VS Code, etc.) and won't appear in `winget list` under
+# their winget package ID. For these, also probe known on-disk locations.
+function Test-PackagePresent([string]$pkg) {
+    switch ($pkg) {
+        'Git.Git' {
+            return (Test-Path "$env:ProgramFiles\Git\bin\git.exe") -or
+                   (Test-Path "${env:ProgramFiles(x86)}\Git\bin\git.exe") -or
+                   (Test-Path "$env:LOCALAPPDATA\Programs\Git\bin\git.exe") -or
+                   [bool](Get-Command git.exe -ErrorAction SilentlyContinue)
+        }
+        'Microsoft.WindowsTerminal' {
+            return [bool](Get-Command wt.exe -ErrorAction SilentlyContinue)
+        }
+        'Microsoft.PowerShell' {
+            return (Test-Path "$env:ProgramFiles\PowerShell\7\pwsh.exe") -or
+                   [bool](Get-Command pwsh.exe -ErrorAction SilentlyContinue)
+        }
+        'GitHub.cli' {
+            return [bool](Get-Command gh.exe -ErrorAction SilentlyContinue)
+        }
+        'Microsoft.VisualStudioCode' {
+            return (Test-Path "$env:ProgramFiles\Microsoft VS Code\Code.exe") -or
+                   (Test-Path "$env:LOCALAPPDATA\Programs\Microsoft VS Code\Code.exe")
+        }
+        default { return $false }
+    }
+}
+
 $alreadyInstalled = @()
 $toInstall = @()
 foreach ($pkg in $packages) {
     if ($installedSnapshot -match [regex]::Escape($pkg)) {
+        $alreadyInstalled += $pkg
+    }
+    elseif (Test-PackagePresent $pkg) {
         $alreadyInstalled += $pkg
     }
     else {

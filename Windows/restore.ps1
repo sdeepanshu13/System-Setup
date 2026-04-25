@@ -26,7 +26,7 @@ $ErrorActionPreference = 'Continue'
 $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Definition
 $wingetJson = Join-Path $ScriptDir "winget-packages.json"
 
-# ─── Auto-elevate to Administrator ───────────────────────
+# --- Auto-elevate to Administrator -----------------------
 $isAdmin = ([Security.Principal.WindowsPrincipal] [Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole(
     [Security.Principal.WindowsBuiltInRole]::Administrator)
 if (-not $isAdmin) {
@@ -51,7 +51,7 @@ if (-not $isAdmin) {
     }
 }
 
-# ─── Per-run logging ─────────────────────────────────────
+# --- Per-run logging -------------------------------------
 $LogRoot = Join-Path $ScriptDir 'logs'
 $RunStamp = Get-Date -Format 'yyyyMMdd-HHmmss'
 $RunLogDir = Join-Path $LogRoot $RunStamp
@@ -60,7 +60,7 @@ $TranscriptPath = Join-Path $RunLogDir 'restore.log'
 try { Start-Transcript -Path $TranscriptPath -Append | Out-Null } catch { }
 Write-Host "Log file: $TranscriptPath" -ForegroundColor DarkGray
 
-# ─── Validation ───────────────────────────────────────────
+# --- Validation -------------------------------------------
 if (-not (Get-Command winget -ErrorAction SilentlyContinue)) {
     Write-Error "winget is not installed. Install App Installer from the Microsoft Store."
     try { Stop-Transcript | Out-Null } catch { }
@@ -73,7 +73,7 @@ if (-not (Test-Path $wingetJson)) {
     exit 1
 }
 
-# ─── Parse package list ──────────────────────────
+# --- Parse package list --------------------------
 try {
     $json = Get-Content $wingetJson -Raw | ConvertFrom-Json
 }
@@ -95,7 +95,7 @@ if ($packages.Count -eq 0) {
     exit 1
 }
 
-# ─── Pre-flight: skip already-installed packages ─────────
+# --- Pre-flight: skip already-installed packages ---------
 Write-Host "Checking for already-installed packages..." -ForegroundColor Cyan
 $installedSnapshot = winget list --source winget --accept-source-agreements 2>$null | Out-String
 $alreadyInstalled = @()
@@ -116,7 +116,7 @@ if ($alreadyInstalled.Count -gt 0) {
 Write-Host ""
 
 if ($toInstall.Count -eq 0) {
-    Write-Host "Nothing to install — all packages already present." -ForegroundColor Green
+    Write-Host "Nothing to install -- all packages already present." -ForegroundColor Green
     try { Stop-Transcript | Out-Null } catch { }
     if ($Host.Name -eq 'ConsoleHost' -and -not $env:WT_SESSION) {
         Write-Host "Press Enter to exit..." -ForegroundColor DarkGray
@@ -135,7 +135,7 @@ Write-Host ""
 Write-Host "Packages to install: $($packages.Count)" -ForegroundColor Yellow
 Write-Host ""
 
-# ─── Categorize for display (auto-derived from package IDs) ──
+# --- Categorize for display (auto-derived from package IDs) --
 function Get-Category([string]$id) {
     switch -Wildcard ($id) {
         'Git.*'                    { return 'Dev Tools' }
@@ -187,7 +187,7 @@ if ($WhatIfMode) {
     exit 0
 }
 
-# ─── Install via winget ──────────────────────────────────
+# --- Install via winget ----------------------------------
 $commonArgs = @(
     '--silent',
     '--accept-package-agreements',
@@ -237,7 +237,7 @@ else {
     Write-Host "Per-package logs: $logDir" -ForegroundColor DarkGray
     Write-Host ""
 
-    # ── Phase A: Priority packages (Git + Terminal first, sequential) ──
+    # -- Phase A: Priority packages (Git + Terminal first, sequential) --
     if ($priorityToInstall.Count -gt 0) {
         Write-Host "Phase A: Installing priority packages first (Git + Terminal)..." -ForegroundColor Cyan
         foreach ($pkg in $priorityToInstall) {
@@ -326,7 +326,7 @@ else {
 
 Write-Host ""
 
-# ─── Verify installation ────────────────────────────────
+# --- Verify installation --------------------------------
 if ($SkipVerify) {
     Write-Host "Skipping verification (use without -SkipVerify to check)." -ForegroundColor DarkGray
 }

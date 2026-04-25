@@ -3,7 +3,7 @@
     One-command Windows dev machine setup. Works from PowerShell, CMD, or Git Bash.
 .DESCRIPTION
     Phase 1: Auto-elevates and runs restore.ps1 (installs all winget packages
-             in parallel — Git is installed first so we have bash for Phase 2).
+             in parallel -- Git is installed first so we have bash for Phase 2).
     Phase 2: Invokes bootstrap-dev.sh via Git Bash for zsh / dotfiles / SSH key.
 .PARAMETER GitName
     Your full name for `git config --global user.name`.
@@ -35,7 +35,7 @@ param(
 $ErrorActionPreference = 'Continue'
 $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Definition
 
-# ─── Auto-elevate ────────────────────────────────────────
+# --- Auto-elevate ----------------------------------------
 $isAdmin = ([Security.Principal.WindowsPrincipal] [Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole(
     [Security.Principal.WindowsBuiltInRole]::Administrator)
 if (-not $isAdmin) {
@@ -66,7 +66,22 @@ Write-Host " Windows Dev Machine Setup" -ForegroundColor Cyan
 Write-Host "=============================================" -ForegroundColor Cyan
 Write-Host ""
 
-# ─── Phase 1: winget packages ────────────────────────────
+# --- Grant ourselves all permissions (Windows equivalent of `chmod 777`) ---
+# Strip Mark-of-the-Web from every script in this folder so a freshly
+# downloaded zip runs without "do you want to run this file?" prompts,
+# and set ExecutionPolicy to Bypass for this process so any nested .ps1
+# (restore.ps1, future helpers) runs without policy errors.
+try {
+    Get-ChildItem -Path $ScriptDir -Recurse -Include *.ps1, *.psm1, *.psd1, *.cmd, *.bat, *.sh `
+        -ErrorAction SilentlyContinue | Unblock-File -ErrorAction SilentlyContinue
+}
+catch { }
+try {
+    Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass -Force -ErrorAction SilentlyContinue
+}
+catch { }
+
+# --- Phase 1: winget packages ----------------------------
 if (-not $SkipPhase1) {
     $restore = Join-Path $ScriptDir 'restore.ps1'
     if (-not (Test-Path $restore)) {
@@ -80,10 +95,19 @@ else {
     Write-Host "Skipping Phase 1 (winget install)." -ForegroundColor Yellow
 }
 
-# ─── Phase 2: bootstrap-dev.sh via Git Bash ──────────────
+# --- Phase 2: bootstrap-dev.sh via Git Bash --------------
 if (-not $SkipPhase2) {
     Write-Host ""
     Write-Host "Phase 2: zsh / dotfiles / SSH setup (via Git Bash)..." -ForegroundColor Cyan
+
+    # Prompt for Git identity here in PowerShell. The bash script runs
+    # non-interactively (no TTY) so it can't prompt itself.
+    if (-not $GitName) {
+        $GitName = Read-Host "Enter your full name (for git config)"
+    }
+    if (-not $GitEmail) {
+        $GitEmail = Read-Host "Enter your GitHub email (for git config + SSH key)"
+    }
 
     # Locate Git Bash (bash.exe). Try several common install locations + PATH.
     $bashCandidates = @(
@@ -115,7 +139,7 @@ if (-not $SkipPhase2) {
     # Pass Git identity through environment so the bash script can run unattended.
     if ($GitName)  { $env:SETUP_GIT_NAME  = $GitName }
     if ($GitEmail) { $env:SETUP_GIT_EMAIL = $GitEmail }
-    # Tell bootstrap-dev.sh to skip Phase 1 — we already did it.
+    # Tell bootstrap-dev.sh to skip Phase 1 -- we already did it.
     $env:SETUP_SKIP_PHASE1 = '1'
 
     # Convert C:\foo\bar to /c/foo/bar for bash
@@ -123,7 +147,8 @@ if (-not $SkipPhase2) {
     $bootstrapPosix = '/' + $drive + ($bootstrap.Substring(2) -replace '\\', '/')
     $bootstrapDirPosix = Split-Path -Parent $bootstrapPosix
 
-    & $bashExe --login -i -c "cd `"$bootstrapDirPosix`" && bash `"$bootstrapPosix`""
+    # -c is enough; --login + -i would emit job-control warnings without a TTY.
+    & $bashExe -c "cd '$bootstrapDirPosix' && bash '$bootstrapPosix'"
     $bashExit = $LASTEXITCODE
 
     Remove-Item Env:SETUP_GIT_NAME, Env:SETUP_GIT_EMAIL, Env:SETUP_SKIP_PHASE1 -ErrorAction SilentlyContinue
@@ -142,11 +167,20 @@ Write-Host " Setup complete!" -ForegroundColor Green
 Write-Host "=============================================" -ForegroundColor Cyan
 Write-Host ""
 Write-Host "Next steps:" -ForegroundColor Yellow
-Write-Host "  1. Close & reopen Windows Terminal — Git Bash + zsh is now the default."
+Write-Host "  1. Close & reopen Windows Terminal -- Git Bash + zsh is now the default."
 Write-Host "  2. Add your SSH key to GitHub: https://github.com/settings/ssh/new"
 Write-Host "     (Public key saved to: $ScriptDir\github-ssh-pubkey.txt)"
 Write-Host "  3. Sign into Chrome / Docker / VS Code (Settings Sync) / JetBrains."
 Write-Host ""
+
+# Show the pubkey so the user can copy it directly from this window.
+$pubKeyPath = Join-Path $ScriptDir 'github-ssh-pubkey.txt'
+if (Test-Path $pubKeyPath) {
+    Write-Host "--- SSH Public Key (copy & paste into GitHub) ---" -ForegroundColor Cyan
+    Get-Content $pubKeyPath | Write-Host
+    Write-Host "-------------------------------------------------" -ForegroundColor Cyan
+    Write-Host ""
+}
 
 if ($Host.Name -eq 'ConsoleHost' -and -not $env:WT_SESSION) {
     Write-Host "Press Enter to exit..." -ForegroundColor DarkGray

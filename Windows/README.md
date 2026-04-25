@@ -24,41 +24,54 @@ Automated setup for a fresh Windows dev machine. **One command** installs ~50 ap
 
 ## Quick Start — pick your shell
 
+> **Fresh Windows install?** Only PowerShell and Command Prompt are available out of the box. Git Bash is installed automatically as part of Phase 1, so use **Option A** or **Option B** for the first run. Option C is only for machines where Git for Windows is already installed.
+
 You can run the setup from **any** of the following. They all do the same thing.
 
-### Option A — PowerShell (recommended)
+### Option A — `Setup.cmd` (easiest, no exec-policy issues)
 
-```powershell
-# Setup.ps1 will auto-elevate via UAC, so you do not need to run PowerShell as Admin.
-cd C:\path\to\System-Setup\Windows
-.\Setup.ps1
+Double-click `Setup.cmd` in Explorer, or run from any shell:
+```cmd
+.\Setup.cmd
 ```
+This is a tiny wrapper that calls `Setup.ps1` with `-ExecutionPolicy Bypass`, so you never see the *"file is not digitally signed"* error.
 
 Pre-fill Git config to run **fully unattended**:
-```powershell
-.\Setup.ps1 -GitName "Jane Doe" -GitEmail "jane@example.com"
-```
-
-If your execution policy blocks scripts:
-```powershell
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\Setup.ps1
-```
-
-### Option B — Command Prompt (cmd.exe)
-
 ```cmd
-cd C:\path\to\System-Setup\Windows
+.\Setup.cmd -GitName "Jane Doe" -GitEmail "jane@example.com"
+```
+
+### Option B — PowerShell directly
+
+Fresh Windows blocks unsigned scripts by default, so use the bypass form:
+```powershell
 powershell -NoProfile -ExecutionPolicy Bypass -File .\Setup.ps1
 ```
 
-Or pre-fill:
-```cmd
-powershell -NoProfile -ExecutionPolicy Bypass -File .\Setup.ps1 -GitName "Jane Doe" -GitEmail "jane@example.com"
+If you just type `.\Setup.ps1` and get **"file ... cannot be loaded ... is not digitally signed"**, do one of:
+```powershell
+# Unblock the downloaded file (per-file):
+Unblock-File .\Setup.ps1; .\Setup.ps1
+
+# Or relax policy for the current user once (per-user):
+Set-ExecutionPolicy -Scope CurrentUser -ExecutionPolicy RemoteSigned -Force
+.\Setup.ps1
 ```
 
-### Option C — Git Bash
+### Option C — Command Prompt (cmd.exe)
 
-If Git Bash is already installed, you can call the bash script directly:
+```cmd
+cd C:\path\to\System-Setup\Windows
+.\Setup.cmd
+```
+
+Or without the wrapper:
+```cmd
+powershell -NoProfile -ExecutionPolicy Bypass -File .\Setup.ps1
+```
+
+### Option D — Git Bash (only if Git for Windows is already installed)
+
 ```bash
 cd /c/path/to/System-Setup/Windows
 chmod +x bootstrap-dev.sh
@@ -70,11 +83,24 @@ Pre-fill Git config via env vars:
 SETUP_GIT_NAME="Jane Doe" SETUP_GIT_EMAIL="jane@example.com" ./bootstrap-dev.sh
 ```
 
-### Option D — Windows Terminal / Warp / pwsh
+### Option E — Windows Terminal / Warp / pwsh
 
-Same as Option A — the script doesn't care which terminal hosts it.
+Same as Option A or B — the script doesn't care which terminal hosts it.
 
 > **Note:** Do **not** run from WSL. The script targets the Windows side (winget, Windows Terminal, Git for Windows). Use one of the options above instead.
+
+### Don't have `git` yet?
+
+If you're on a brand-new machine without Git, you have two options to get the repo onto the box:
+
+1. **Install Git first**, then clone:
+   ```powershell
+   winget install --id Git.Git -e --accept-package-agreements --accept-source-agreements
+   git clone https://github.com/sdeepanshu13/System-Setup.git
+   cd System-Setup\Windows
+   .\Setup.ps1
+   ```
+2. **Download the ZIP** from https://github.com/sdeepanshu13/System-Setup → "Code" → "Download ZIP", extract it, then run `.\Setup.ps1` from the `Windows` folder.
 
 ---
 

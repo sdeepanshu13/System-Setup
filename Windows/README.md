@@ -1,92 +1,160 @@
 # Windows Setup
 
-Automated setup scripts for a fresh Windows dev machine. One command installs all software, configures Git Bash with Zsh + Powerlevel10k, generates SSH keys, restores VS Code extensions, and more.
+Automated setup for a fresh Windows dev machine. **One command** installs ~50 apps, configures Git Bash + zsh + Powerlevel10k, generates an SSH key, restores VS Code extensions, and sets up Windows Terminal.
 
 ## What's Included
 
-| File | Purpose |
-|------|---------|
-| `bootstrap-dev.sh` | Main entry point — runs everything in order |
-| `restore.ps1` | Installs all software via `winget import` |
-| `winget-packages.json` | List of 49 winget packages (dev tools, languages, browsers, etc.) |
-| `vscode-extensions.txt` | 41 VS Code extensions to restore |
-| `zshrc-template` | Optimized `.zshrc` for Git Bash with Powerlevel10k |
+| File                     | Purpose                                                                            |
+| ------------------------ | ---------------------------------------------------------------------------------- |
+| `Setup.ps1`              | **Universal entry point** — auto-elevates, runs Phase 1 + Phase 2                  |
+| `restore.ps1`            | Phase 1 — installs all winget packages in parallel (skips already-installed)       |
+| `bootstrap-dev.sh`       | Phase 2 — Git config, SSH key, zsh, oh-my-zsh, p10k, fonts, dotfiles, VS Code      |
+| `winget-packages.json`   | List of winget packages to install                                                 |
+| `vscode-extensions.txt`  | List of VS Code extensions to restore                                              |
+| `zshrc-template`         | Optimized `.zshrc` for Git Bash + Powerlevel10k                                    |
+| `p10k-template`          | Powerlevel10k config (`~/.p10k.zsh`)                                               |
+| `zsh-gitbash.tar.gz`     | Bundled zsh binaries + DLLs that get extracted into `C:\Program Files\Git`         |
 
 ## Prerequisites
 
-- **Windows 10/11** with [winget](https://aka.ms/getwinget) installed (comes with App Installer from the Microsoft Store)
-- **Git for Windows** — needed to run Git Bash. If not already installed, get it from https://gitforwindows.org or run:
-  ```
-  winget install Git.Git
-  ```
-- **Administrator privileges** — required for font installation and winget imports
+- Windows 10 / 11
+- [winget](https://aka.ms/getwinget) (comes with App Installer from the Microsoft Store)
+- Internet connection
+- An **Administrator** account — `Setup.ps1` auto-elevates via UAC if needed.
 
-## Quick Start
+## Quick Start — pick your shell
 
-1. **Clone the repo** (from Git Bash or PowerShell):
-   ```bash
-   git clone https://github.com/sdeepanshu13/System-Setup.git
-   cd System-Setup/Windows
-   ```
+You can run the setup from **any** of the following. They all do the same thing.
 
-2. **Run the bootstrap script** (Git Bash as Administrator):
-   ```bash
-   chmod +x bootstrap-dev.sh
-   ./bootstrap-dev.sh
-   ```
+### Option A — PowerShell (recommended)
 
-3. **Follow the prompts** — the script will ask for your name and email (for Git config + SSH key).
-
-4. **After completion**:
-   - Close and reopen Git Bash — Zsh starts automatically
-   - Run `p10k configure` to customize your prompt
-   - Add the generated SSH key to GitHub: https://github.com/settings/ssh/new
-   - Set terminal font to **MesloLGS NF**
-
-## What the Bootstrap Script Does
-
-| Step | Action |
-|------|--------|
-| 0 | Installs all winget packages via `restore.ps1` |
-| 1 | Installs Oh My Zsh |
-| 2 | Installs Powerlevel10k theme |
-| 3 | Installs zsh-autosuggestions plugin |
-| 4 | Installs zsh-syntax-highlighting plugin |
-| 5 | Downloads & installs MesloLGS Nerd Font |
-| 6 | Deploys optimized `.zshrc` |
-| 7 | Configures `.bashrc` to auto-launch Zsh |
-| 8 | Sets Git defaults (`init.defaultBranch main`, `pull.rebase true`, etc.) |
-| 9 | Generates ed25519 SSH key & saves public key to file |
-| 10 | Installs VS Code extensions from `vscode-extensions.txt` |
-| 11 | Installs Node.js LTS via nvm |
-| 12 | Configures Windows Terminal font (if installed) |
-
-## Running Individual Scripts
-
-**Install software only** (PowerShell as Administrator):
 ```powershell
-.\restore.ps1
+# Setup.ps1 will auto-elevate via UAC, so you do not need to run PowerShell as Admin.
+cd C:\path\to\System-Setup\Windows
+.\Setup.ps1
 ```
 
-**Preview what would be installed** (dry run):
+Pre-fill Git config to run **fully unattended**:
 ```powershell
-.\restore.ps1 -WhatIfMode
+.\Setup.ps1 -GitName "Jane Doe" -GitEmail "jane@example.com"
 ```
 
-## Customizing
-
-- **Add/remove winget packages**: Edit `winget-packages.json`
-- **Add/remove VS Code extensions**: Edit `vscode-extensions.txt` (one extension ID per line)
-- **Change shell config**: Edit `zshrc-template`
-
-## Updating the Package List
-
-To re-export your current system's packages:
+If your execution policy blocks scripts:
 ```powershell
-winget export -o winget-packages.json --accept-source-agreements
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\Setup.ps1
 ```
 
-To re-export VS Code extensions:
+### Option B — Command Prompt (cmd.exe)
+
+```cmd
+cd C:\path\to\System-Setup\Windows
+powershell -NoProfile -ExecutionPolicy Bypass -File .\Setup.ps1
+```
+
+Or pre-fill:
+```cmd
+powershell -NoProfile -ExecutionPolicy Bypass -File .\Setup.ps1 -GitName "Jane Doe" -GitEmail "jane@example.com"
+```
+
+### Option C — Git Bash
+
+If Git Bash is already installed, you can call the bash script directly:
 ```bash
+cd /c/path/to/System-Setup/Windows
+chmod +x bootstrap-dev.sh
+./bootstrap-dev.sh
+```
+
+Pre-fill Git config via env vars:
+```bash
+SETUP_GIT_NAME="Jane Doe" SETUP_GIT_EMAIL="jane@example.com" ./bootstrap-dev.sh
+```
+
+### Option D — Windows Terminal / Warp / pwsh
+
+Same as Option A — the script doesn't care which terminal hosts it.
+
+> **Note:** Do **not** run from WSL. The script targets the Windows side (winget, Windows Terminal, Git for Windows). Use one of the options above instead.
+
+---
+
+## What runs in each phase
+
+**Phase 1** ([restore.ps1](restore.ps1)) — auto-elevates, then:
+1. Snapshots `winget list` and **skips already-installed** packages.
+2. Installs priority packages **sequentially** so they're available immediately:
+   `Git.Git`, `GitHub.cli`, `Microsoft.WindowsTerminal`, `Microsoft.PowerShell`.
+3. Installs everything else **in parallel** (default 5 at a time, configurable with `-Throttle`).
+4. Logs everything to `Windows\logs\<timestamp>\` (full transcript + per-package logs).
+
+**Phase 2** ([bootstrap-dev.sh](bootstrap-dev.sh)) — runs through Git Bash:
+| # | Action |
+|---|--------|
+| 1 | `git config` identity + sane defaults (`init.defaultBranch=main`, `pull.rebase=true`, etc.) |
+| 2 | Generates ed25519 SSH key + writes pubkey to `github-ssh-pubkey.txt` |
+| 3 | Extracts bundled `zsh-gitbash.tar.gz` into `C:\Program Files\Git` |
+| 4 | Installs Oh My Zsh (idempotent) |
+| 5 | Clones Powerlevel10k + zsh-autosuggestions + zsh-syntax-highlighting |
+| 6 | Downloads & installs MesloLGS Nerd Font (4 weights) |
+| 7 | Deploys `~/.zshrc` and `~/.p10k.zsh` from templates (with backup-on-diff) |
+| 8 | Adds **Git Bash** profile to Windows Terminal, sets it as **default**, applies MesloLGS NF font to all profiles |
+| 8b | Adds `exec zsh` + UTF-8 codepage to `~/.bashrc` (idempotent, marker-guarded) |
+| 9 | Restores VS Code extensions from `vscode-extensions.txt` (parallel) |
+| 10 | Installs Node.js LTS via nvm (if nvm is installed) |
+
+## Common Operations
+
+```powershell
+# Just install software, skip dotfile setup:
+.\Setup.ps1 -SkipPhase2
+
+# Just dotfiles, skip winget (everything already installed):
+.\Setup.ps1 -SkipPhase1
+
+# Faster parallelism:
+.\Setup.ps1 -Throttle 8
+
+# Preview what would be installed:
+.\restore.ps1 -WhatIfMode
+
+# Force the old sequential `winget import` behavior:
+.\restore.ps1 -Sequential
+```
+
+## After Setup Completes
+
+1. **Close all Windows Terminal windows** and reopen — the new default profile + font kick in only on a fresh launch.
+2. **Add the SSH key to GitHub**: https://github.com/settings/ssh/new
+   The public key is saved to `Windows\github-ssh-pubkey.txt`.
+3. Run `p10k configure` if you want to re-tune the prompt; otherwise the bundled `~/.p10k.zsh` is used.
+4. Sign into Chrome, Docker, JetBrains Toolbox, VS Code (Settings Sync), etc.
+
+## Troubleshooting
+
+- **"zsh.exe: error while loading shared libraries: msys-zsh-5.9.dll"** — Old `zsh-gitbash.tar.gz` bundle. Re-pull and re-run `.\Setup.ps1 -SkipPhase1`.
+- **Windows Terminal still uses old font / profile** — Close *all* Terminal windows first, then reopen. Settings are loaded once at startup.
+- **Script crashes with "MSYSTEM: unbound variable"** — You ran `bootstrap-dev.sh` from WSL. Run it from Git Bash instead, or use `Setup.ps1` from PowerShell.
+- **A winget package fails** — Check `Windows\logs\<timestamp>\packages\<PackageId>.log`. Most failures are transient — just rerun `Setup.ps1`; already-installed packages are skipped.
+
+## Updating the bundled artifacts
+
+Re-export your current state into the repo:
+
+```powershell
+# winget packages
+winget export -o winget-packages.json --accept-source-agreements
+
+# VS Code extensions
 code --list-extensions > vscode-extensions.txt
+```
+
+```bash
+# Bundle the current zsh + DLLs from Git Bash:
+cd "/c/Program Files/Git" && tar czf /c/path/to/System-Setup/Windows/zsh-gitbash.tar.gz \
+    usr/bin/zsh.exe usr/bin/zsh-5.9.exe usr/bin/msys-zsh-5.9.dll \
+    usr/share/zsh etc/zsh usr/lib/zsh
+
+# Snapshot current dotfiles:
+cp ~/.zshrc   /c/path/to/System-Setup/Windows/zshrc-template
+cp ~/.p10k.zsh /c/path/to/System-Setup/Windows/p10k-template
 ```

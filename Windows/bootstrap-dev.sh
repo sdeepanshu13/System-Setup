@@ -31,7 +31,7 @@ clone_if_missing() {
 
 # Detect runtime environment
 detect_environment() {
-    if [[ "$OSTYPE" == "msys" || "$OSTYPE" == "cygwin" || -n "$MSYSTEM" ]]; then
+    if [[ "$OSTYPE" == "msys" || "$OSTYPE" == "cygwin" || -n "${MSYSTEM:-}" ]]; then
         echo "gitbash"
     elif [[ -f /proc/version ]] && grep -qi microsoft /proc/version 2>/dev/null; then
         echo "wsl"
@@ -111,7 +111,9 @@ echo "🔍 Detected environment: $ENV_TYPE"
 # 0) Install winget packages (Phase 1)
 # ---------------------------
 RESTORE_PS1="$SCRIPT_DIR/restore.ps1"
-if [[ -f "$RESTORE_PS1" ]]; then
+if [[ "${SETUP_SKIP_PHASE1:-0}" == "1" ]]; then
+    echo "⏭️  Phase 1 already done by Setup.ps1 — skipping winget install."
+elif [[ -f "$RESTORE_PS1" ]]; then
     echo ""
     echo "📦 Phase 1: Installing software via winget (parallel, unattended)..."
     WIN_RESTORE="$(cygpath -w "$RESTORE_PS1")"
@@ -134,8 +136,26 @@ echo ""
 # ---------------------------
 echo "⚙️  Git Configuration"
 echo ""
-read -rp "Enter your full name (for git config): " GIT_NAME
-read -rp "Enter your GitHub email: " GIT_EMAIL
+
+# Allow non-interactive use: SETUP_GIT_NAME / SETUP_GIT_EMAIL env vars
+# (set by Setup.ps1 -GitName / -GitEmail) bypass the prompts.
+GIT_NAME="${SETUP_GIT_NAME:-}"
+GIT_EMAIL="${SETUP_GIT_EMAIL:-}"
+
+if [[ -z "$GIT_NAME" ]]; then
+    if [[ -t 0 ]]; then
+        read -rp "Enter your full name (for git config): " GIT_NAME
+    else
+        echo "⚠️  No SETUP_GIT_NAME set and no TTY — skipping git user.name."
+    fi
+fi
+if [[ -z "$GIT_EMAIL" ]]; then
+    if [[ -t 0 ]]; then
+        read -rp "Enter your GitHub email: " GIT_EMAIL
+    else
+        echo "⚠️  No SETUP_GIT_EMAIL set and no TTY — skipping git user.email."
+    fi
+fi
 
 if [[ -n "$GIT_NAME" && -n "$GIT_EMAIL" ]]; then
     git config --global user.name "$GIT_NAME"
@@ -471,28 +491,8 @@ fi
 set -e
 
 # ---------------------------
-# 11) Configure Windows Terminal font (best-effort)
+# 11) (Reserved) Windows Terminal font is configured in section 8.
 # ---------------------------
-WT_SETTINGS="$HOME/AppData/Local/Packages/Microsoft.WindowsTerminal_8wekyb3d8bbwe/LocalState/settings.json"
-if [[ -f "$WT_SETTINGS" ]]; then
-    if ! grep -q "MesloLGS" "$WT_SETTINGS" 2>/dev/null; then
-        echo "🖥️  Configuring Windows Terminal font..."
-        WIN_WT_SETTINGS="$(cygpath -w "$WT_SETTINGS")"
-        powershell.exe -NoProfile -ExecutionPolicy Bypass -Command "
-            \$s = Get-Content '$WIN_WT_SETTINGS' -Raw | ConvertFrom-Json
-            if (-not \$s.profiles.defaults.font) {
-                \$s.profiles.defaults | Add-Member -NotePropertyName 'font' -NotePropertyValue @{} -Force
-            }
-            \$s.profiles.defaults.font = @{ face = 'MesloLGS NF'; size = 10 }
-            \$s | ConvertTo-Json -Depth 32 | Set-Content '$WIN_WT_SETTINGS' -Encoding UTF8
-        " 2>/dev/null && echo "✅ Windows Terminal font configured." \
-                      || echo "⚠️  Could not update Windows Terminal settings."
-    else
-        echo "✅ Windows Terminal already uses MesloLGS NF."
-    fi
-else
-    echo "ℹ️  Windows Terminal settings not found — configure font manually."
-fi
 
 # ---------------------------
 # Done

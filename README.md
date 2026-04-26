@@ -8,15 +8,19 @@ Download. Double-click. Pick what you want. Done.
 
 ## Download
 
-**[Download Setup.exe](https://github.com/sdeepanshu13/System-Setup/releases/latest/download/Setup.exe)** (3 MB)
+**[Download System-Setup.zip](https://github.com/sdeepanshu13/System-Setup/releases/latest/download/System-Setup.zip)**
+
+Extract it. Double-click `Setup.exe` inside. That's it.
+
+> Why a .zip? Extracting removes the "downloaded from internet" flag, so Windows Defender and SmartScreen don't interfere.
 
 ---
 
 ## How to use
 
-1. **Download** `Setup.exe` from the link above
-2. **Double-click** it
-3. **Allow** the admin prompt (UAC)
+1. **Download** `System-Setup.zip` from the link above
+2. **Extract** the zip (right-click > Extract All)
+3. **Double-click** `Setup.exe` inside the extracted folder
 4. **Check/uncheck** what you want in the GUI
 5. **Pick** your default terminal
 6. **Click Install**

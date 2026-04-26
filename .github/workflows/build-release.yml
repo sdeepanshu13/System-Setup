@@ -1,4 +1,4 @@
-name: Build and Release Setup.exe
+name: Build and Release
 
 on:
   push:
@@ -26,11 +26,44 @@ jobs:
           cd Windows
           .\Build-Exe.ps1
 
+      - name: Package as ZIP (avoids SmartScreen warnings)
+        shell: pwsh
+        run: |
+          # Create a clean release zip with Setup.exe + a readme inside
+          $zipDir = 'dist\System-Setup'
+          New-Item -ItemType Directory -Path $zipDir -Force | Out-Null
+          Copy-Item 'dist\Setup.exe' $zipDir
+          # Add a tiny instructions file inside the zip
+          @"
+          System-Setup - Windows Dev Machine Installer
+          =============================================
+
+          1. Extract this folder
+          2. Double-click Setup.exe
+          3. Pick what you want in the GUI
+          4. Click Install
+
+          More info: https://github.com/${{ github.repository }}
+          "@ | Set-Content "$zipDir\README.txt"
+          Compress-Archive -Path $zipDir -DestinationPath 'dist\System-Setup.zip' -Force
+
+      - name: Generate checksums
+        id: checksum
+        shell: pwsh
+        run: |
+          $exeHash = (Get-FileHash 'dist\Setup.exe' -Algorithm SHA256).Hash
+          $zipHash = (Get-FileHash 'dist\System-Setup.zip' -Algorithm SHA256).Hash
+          $exeSize = '{0:N1} MB' -f ((Get-Item 'dist\Setup.exe').Length / 1MB)
+          $zipSize = '{0:N1} MB' -f ((Get-Item 'dist\System-Setup.zip').Length / 1MB)
+          "exe_hash=$exeHash" >> $env:GITHUB_OUTPUT
+          "zip_hash=$zipHash" >> $env:GITHUB_OUTPUT
+          "exe_size=$exeSize" >> $env:GITHUB_OUTPUT
+          "zip_size=$zipSize" >> $env:GITHUB_OUTPUT
+
       - name: Get version tag
         id: version
         shell: bash
         run: |
-          # Auto-increment: count commits on main
           COUNT=$(git rev-list --count HEAD)
           SHORT=$(git rev-parse --short HEAD)
           TAG="v1.0.${COUNT}"
@@ -43,12 +76,26 @@ jobs:
           tag_name: ${{ steps.version.outputs.tag }}
           name: ${{ steps.version.outputs.name }}
           body: |
-            **Download `Setup.exe` below and double-click it.**
+            ## Download
 
-            Auto-built from commit ${{ github.sha }}.
+            **Recommended: Download `System-Setup.zip`**, extract it, and double-click `Setup.exe` inside.
 
-            See [README](https://github.com/${{ github.repository }}#readme) for details.
-          files: dist/Setup.exe
+            > Using the .zip avoids Windows SmartScreen warnings since extracted files are not flagged.
+
+            | File | Size | SHA-256 |
+            |------|------|---------|
+            | `System-Setup.zip` | ${{ steps.checksum.outputs.zip_size }} | `${{ steps.checksum.outputs.zip_hash }}` |
+            | `Setup.exe` (standalone) | ${{ steps.checksum.outputs.exe_size }} | `${{ steps.checksum.outputs.exe_hash }}` |
+
+            **Verify integrity** (optional):
+            ```powershell
+            (Get-FileHash .\System-Setup.zip).Hash -eq '${{ steps.checksum.outputs.zip_hash }}'
+            ```
+
+            Built from [`${{ github.sha }}`](https://github.com/${{ github.repository }}/commit/${{ github.sha }})
+          files: |
+            dist/System-Setup.zip
+            dist/Setup.exe
           make_latest: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

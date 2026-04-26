@@ -314,7 +314,8 @@ $commonArgs = @(
     '--disable-interactivity',
     '--ignore-warnings',
     '--ignore-security-hash',
-    '--source', 'winget'
+    '--source', 'winget',
+    '--override', '/norestart REBOOT=ReallySuppress'
 )
 
 # Priority packages installed sequentially BEFORE the parallel batch so that
@@ -380,7 +381,8 @@ else {
         '--ignore-warnings',
         '--ignore-security-hash',
         '--force',
-        '--source', 'winget'
+        '--source', 'winget',
+        '--override', '/norestart REBOOT=ReallySuppress'
     )
     if ($priorityToInstall.Count -gt 0) {
         Write-Host "Phase A: Installing priority packages first (Git + Terminal)..." -ForegroundColor Cyan

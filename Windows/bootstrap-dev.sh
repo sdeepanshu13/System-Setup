@@ -1,6 +1,6 @@
 #!/bin/bash
 # ==============================================
-# 🚀 Deepanshu Dev Machine Bootstrap (Git Bash)
+# Dev Machine Bootstrap (Git Bash)
 # ==============================================
 # Usage: Open Git Bash as Administrator, then run:
 #   ./bootstrap-dev.sh
@@ -101,7 +101,7 @@ install_zsh_gitbash() {
 }
 
 echo "============================================="
-echo "🚀 Deepanshu Dev Machine Bootstrap Starting"
+echo "Dev Machine Bootstrap Starting"
 echo "============================================="
 
 ENV_TYPE=$(detect_environment)
@@ -120,9 +120,16 @@ elif [[ -f "$RESTORE_PS1" ]]; then
     # Run elevated PowerShell so per-package UAC prompts are suppressed.
     # Override parallelism with: WINGET_THROTTLE=8 ./bootstrap-dev.sh
     THROTTLE="${WINGET_THROTTLE:-5}"
-    powershell.exe -NoProfile -ExecutionPolicy Bypass -File "$WIN_RESTORE" -Throttle "$THROTTLE" || true
-    echo ""
-    echo "✅ Phase 1 complete."
+    if powershell.exe -NoProfile -ExecutionPolicy Bypass -File "$WIN_RESTORE" -Throttle "$THROTTLE"; then
+        echo ""
+        echo "✅ Phase 1 complete."
+    else
+        echo ""
+        echo "⚠️  Phase 1 reported failures (some packages may not have installed)."
+        echo "    Check logs/<latest>/restore.log and packages/*.log for details."
+        echo "    Continuing with Phase 2 -- it can recover from missing packages,"
+        echo "    but you may want to re-run Setup.ps1 afterwards."
+    fi
     echo ""
 else
     echo "⚠️  restore.ps1 not found — skipping winget package install."
@@ -441,6 +448,23 @@ fi
 BASH_EOF
         echo "✅ .bashrc configured to launch zsh + UTF-8 codepage."
     fi
+
+    # Also write ~/.bash_profile so Git Bash doesn't show the "Found ~/.bashrc
+    # but no ~/.bash_profile" warning on the very first launch. Idempotent.
+    BASH_PROFILE="$HOME/.bash_profile"
+    PROFILE_MARKER='# >>> System-Setup: source bashrc >>>'
+    if [[ ! -f "$BASH_PROFILE" ]] || ! grep -qF "$PROFILE_MARKER" "$BASH_PROFILE" 2>/dev/null; then
+        cat >> "$BASH_PROFILE" << 'PROFILE_EOF'
+
+# >>> System-Setup: source bashrc >>>
+# Login shells should source .bashrc so zsh auto-launch + UTF-8 take effect.
+if [ -f "$HOME/.bashrc" ]; then
+    . "$HOME/.bashrc"
+fi
+# <<< System-Setup: source bashrc <<<
+PROFILE_EOF
+        echo "✅ .bash_profile created (suppresses Git Bash 'no profile' warning)."
+    fi
 fi
 
 else
@@ -462,7 +486,7 @@ if [[ -f "$VSCODE_EXT_FILE" ]] && command -v code &>/dev/null; then
     while IFS= read -r ext; do
         [[ -z "$ext" || "$ext" == \#* ]] && continue
         TOTAL=$((TOTAL + 1))
-        if echo "$INSTALLED_EXT" | grep -qi "^${ext}$"; then
+        if echo "$INSTALLED_EXT" | grep -Fxqi "$ext"; then
             SKIPPED=$((SKIPPED + 1))
         else
             code --install-extension "$ext" --force 2>/dev/null &

@@ -38,7 +38,8 @@ if (-not $isAdmin) {
         }
         else {
             $argList += "-$($kv.Key)"
-            $argList += "$($kv.Value)"
+            # Quote the value so paths/strings containing spaces survive elevation.
+            $argList += "`"$($kv.Value)`""
         }
     }
     try {
@@ -52,24 +53,39 @@ if (-not $isAdmin) {
 }
 
 # --- Per-run logging -------------------------------------
-$LogRoot = Join-Path $ScriptDir 'logs'
-$RunStamp = Get-Date -Format 'yyyyMMdd-HHmmss'
-$RunLogDir = Join-Path $LogRoot $RunStamp
-New-Item -ItemType Directory -Path $RunLogDir -Force | Out-Null
-$TranscriptPath = Join-Path $RunLogDir 'restore.log'
-try { Start-Transcript -Path $TranscriptPath -Append | Out-Null } catch { }
-Write-Host "Log file: $TranscriptPath" -ForegroundColor DarkGray
+# When invoked via Setup.ps1, the parent already runs Start-Transcript into
+# setup.log, so we DON'T start a second transcript (PS can only have one).
+# We still set $RunLogDir so per-package logs land in the right place.
+$script:OwnTranscript = $false
+if ($env:SETUP_RUN_LOG_DIR -and (Test-Path $env:SETUP_RUN_LOG_DIR)) {
+    $RunLogDir = $env:SETUP_RUN_LOG_DIR
+}
+else {
+    # Running standalone — create our own log folder + transcript.
+    $LogRoot   = Join-Path $ScriptDir 'logs'
+    $RunStamp  = Get-Date -Format 'yyyyMMdd-HHmmss'
+    $RunLogDir = Join-Path $LogRoot $RunStamp
+    New-Item -ItemType Directory -Path $RunLogDir -Force | Out-Null
+    $TranscriptPath = Join-Path $RunLogDir 'setup.log'
+    try { Start-Transcript -Path $TranscriptPath -Append | Out-Null; $script:OwnTranscript = $true } catch { }
+    Write-Host "Log file: $TranscriptPath" -ForegroundColor DarkGray
+}
+
+trap {
+    if ($script:OwnTranscript) { try { Stop-Transcript | Out-Null } catch { } }
+    break
+}
 
 # --- Validation -------------------------------------------
 if (-not (Get-Command winget -ErrorAction SilentlyContinue)) {
     Write-Error "winget is not installed. Install App Installer from the Microsoft Store."
-    try { Stop-Transcript | Out-Null } catch { }
+    if ($script:OwnTranscript) { try { Stop-Transcript | Out-Null } catch { } }
     exit 1
 }
 
 if (-not (Test-Path $wingetJson)) {
     Write-Error "winget-packages.json not found in $ScriptDir"
-    try { Stop-Transcript | Out-Null } catch { }
+    if ($script:OwnTranscript) { try { Stop-Transcript | Out-Null } catch { } }
     exit 1
 }
 
@@ -77,15 +93,21 @@ if (-not (Test-Path $wingetJson)) {
 # A stale or corrupt source cache is the #1 cause of mysterious package
 # install failures (hash mismatches, "package not found", random hex codes).
 # Reset + update once at the top so every run starts from a known-good state.
+# Wrap in a job with a hard timeout so a hung CDN can't stall us forever.
 Write-Host "Refreshing winget sources (reset + update)..." -ForegroundColor Cyan
-try {
+$srcJob = Start-Job -ScriptBlock {
     & winget source reset --force *>&1 | Out-Null
     & winget source update *>&1 | Out-Null
+}
+if (Wait-Job -Job $srcJob -Timeout 120) {
+    Receive-Job -Job $srcJob | Out-Null
     Write-Host "  Sources refreshed." -ForegroundColor DarkGray
 }
-catch {
-    Write-Warning "winget source refresh failed (continuing anyway): $_"
+else {
+    Write-Warning "  winget source refresh timed out after 120s; continuing anyway."
+    Stop-Job -Job $srcJob -ErrorAction SilentlyContinue
 }
+Remove-Job -Job $srcJob -Force -ErrorAction SilentlyContinue
 Write-Host ""
 
 # --- Parse package list --------------------------
@@ -94,7 +116,7 @@ try {
 }
 catch {
     Write-Error "Failed to parse winget-packages.json: $_"
-    try { Stop-Transcript | Out-Null } catch { }
+    if ($script:OwnTranscript) { try { Stop-Transcript | Out-Null } catch { } }
     exit 1
 }
 
@@ -165,11 +187,7 @@ Write-Host ""
 
 if ($toInstall.Count -eq 0) {
     Write-Host "Nothing to install -- all packages already present." -ForegroundColor Green
-    try { Stop-Transcript | Out-Null } catch { }
-    if ($Host.Name -eq 'ConsoleHost' -and -not $env:WT_SESSION) {
-        Write-Host "Press Enter to exit..." -ForegroundColor DarkGray
-        [void][System.Console]::ReadLine()
-    }
+    if ($script:OwnTranscript) { try { Stop-Transcript | Out-Null } catch { } }
     exit 0
 }
 
@@ -236,12 +254,22 @@ if ($WhatIfMode) {
 }
 
 # --- Install via winget ----------------------------------
+# On winget v1.28+ the --ignore-security-hash flag is a restricted admin
+# feature that must be explicitly enabled. Without it winget prints the usage
+# help and exits. Enable it once; if the setting already exists this is a
+# no-op.
+try {
+    & winget settings --enable InstallerHashOverride *>&1 | Out-Null
+}
+catch { }
+
 $commonArgs = @(
     '--silent',
     '--accept-package-agreements',
     '--accept-source-agreements',
     '--disable-interactivity',
     '--ignore-warnings',
+    '--ignore-security-hash',
     '--source', 'winget'
 )
 
@@ -268,16 +296,23 @@ if ($Sequential) {
 }
 else {
     # Prefer ThreadJob (lightweight). Fall back to Start-Job if unavailable.
+    # Suppress the noisy "module not found" error if ThreadJob isn't there --
+    # we handle it gracefully.
     $useThreadJob = $false
     if (Get-Command Start-ThreadJob -ErrorAction SilentlyContinue) {
         $useThreadJob = $true
     }
     else {
+        $prevEAP = $ErrorActionPreference
+        $ErrorActionPreference = 'SilentlyContinue'
         try {
-            Import-Module ThreadJob -ErrorAction Stop
-            $useThreadJob = $true
+            Import-Module ThreadJob -ErrorAction SilentlyContinue 2>$null
+            if (Get-Command Start-ThreadJob -ErrorAction SilentlyContinue) {
+                $useThreadJob = $true
+            }
         }
         catch { $useThreadJob = $false }
+        finally { $ErrorActionPreference = $prevEAP }
     }
 
     $logDir = Join-Path $RunLogDir 'packages'
@@ -362,7 +397,7 @@ else {
 
     foreach ($pkg in $remainingPackages) {
         # Throttle: wait until a slot opens
-        while (($jobs | Where-Object { $_.State -eq 'Running' }).Count -ge $Throttle) {
+        while (@($jobs | Where-Object { $_.State -eq 'Running' }).Count -ge $Throttle) {
             $done = Wait-Job -Job $jobs -Any -Timeout 5
             if ($done) {
                 foreach ($j in @($done)) {
@@ -373,21 +408,24 @@ else {
                     Write-Host ("  [{0,3}/{1}] {2} {3}" -f $completed, $total, $status, $r.Package) -ForegroundColor $color
                     Remove-Job -Job $j | Out-Null
                 }
-                $jobs = $jobs | Where-Object { $_.State -eq 'Running' }
+                # @(...) is critical: when the filter returns one job (or zero),
+                # the result collapses to a scalar and `$jobs += newJob` then calls
+                # op_Addition on PSRemotingJob -- which doesn't exist and throws.
+                $jobs = @($jobs | Where-Object { $_.State -eq 'Running' })
             }
         }
 
         Write-Host ("  -> queued: $pkg") -ForegroundColor DarkGray
         if ($useThreadJob) {
-            $jobs += Start-ThreadJob -ScriptBlock $scriptBlock -ArgumentList $pkg, $commonArgs, $logDir
+            $jobs = @($jobs) + (Start-ThreadJob -ScriptBlock $scriptBlock -ArgumentList $pkg, $commonArgs, $logDir)
         }
         else {
-            $jobs += Start-Job -ScriptBlock $scriptBlock -ArgumentList $pkg, $commonArgs, $logDir
+            $jobs = @($jobs) + (Start-Job -ScriptBlock $scriptBlock -ArgumentList $pkg, $commonArgs, $logDir)
         }
     }
 
     # Drain remaining
-    while ($jobs.Count -gt 0) {
+    while (@($jobs).Count -gt 0) {
         $done = Wait-Job -Job $jobs -Any
         foreach ($j in @($done)) {
             $r = Receive-Job -Job $j
@@ -397,7 +435,7 @@ else {
             Write-Host ("  [{0,3}/{1}] {2} {3}" -f $completed, $total, $status, $r.Package) -ForegroundColor $color
             Remove-Job -Job $j | Out-Null
         }
-        $jobs = $jobs | Where-Object { $_.State -eq 'Running' }
+        $jobs = @($jobs | Where-Object { $_.State -eq 'Running' })
     }
 }
 
@@ -452,13 +490,6 @@ else {
 Write-Host ""
 Write-Host "Next: Run bootstrap-dev.sh in Git Bash for zsh/p10k setup." -ForegroundColor Yellow
 Write-Host ""
-Write-Host "Full log: $TranscriptPath" -ForegroundColor DarkGray
-Write-Host ""
 
-try { Stop-Transcript | Out-Null } catch { }
+if ($script:OwnTranscript) { try { Stop-Transcript | Out-Null } catch { } }
 
-# Keep elevated window open so the user can read the summary.
-if ($Host.Name -eq 'ConsoleHost' -and -not $env:WT_SESSION) {
-    Write-Host "Press Enter to exit..." -ForegroundColor DarkGray
-    [void][System.Console]::ReadLine()
-}

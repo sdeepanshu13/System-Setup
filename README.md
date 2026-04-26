@@ -52,3 +52,14 @@ chmod +x bootstrap-dev.sh
 ```
 
 See [Windows/README.md](Windows/README.md) for prerequisites, troubleshooting, and how to update the bundled artifacts.
+
+## Highlights
+
+- **One command** — no babysitting. Auto-elevates, parallel installs, idempotent re-runs.
+- **~55 winget apps** — Git, VS Code, Visual Studio, JetBrains Toolbox, Docker, Chrome, Office, Teams, etc.
+- **Polyglot dev stack** — Node + npm globals (React, TS, ESLint…), Python + pipx tools (uv, ruff, poetry…), Java (Temurin 17/21 + Maven/Gradle), Go, Rust (rustup + clippy + rust-analyzer), .NET SDK 10, C/C++ (LLVM, MinGW, CMake, Ninja, MSVC Build Tools).
+- **Windows features** — WSL2, Hyper-V, Containers, Windows Sandbox, .NET 3.5 enabled in one shot.
+- **Shell** — Git Bash + zsh + Oh My Zsh + Powerlevel10k + MesloLGS Nerd Font, set as the elevated default in Windows Terminal.
+- **SSH key** — ed25519 generated and printed for direct copy-paste into GitHub.
+- **One log folder per run** — `Windows\logs\<timestamp>\` with `setup.log`, `restore.log`, `bootstrap-dev.log`, plus per-package winget logs.
+- **Production-ready** — guaranteed transcript closure, network timeouts on every external call, hash-mismatch resilience, fail-loud error reporting.

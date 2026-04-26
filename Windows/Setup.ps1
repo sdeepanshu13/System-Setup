@@ -66,6 +66,26 @@ Write-Host " Windows Dev Machine Setup" -ForegroundColor Cyan
 Write-Host "=============================================" -ForegroundColor Cyan
 Write-Host ""
 
+# --- Per-run logging (ONE file captures Phase 1 + 1b + 2) ---
+$LogRoot   = Join-Path $ScriptDir 'logs'
+$RunStamp  = Get-Date -Format 'yyyyMMdd-HHmmss'
+$RunLogDir = Join-Path $LogRoot $RunStamp
+New-Item -ItemType Directory -Path $RunLogDir -Force | Out-Null
+$SetupLog  = Join-Path $RunLogDir 'setup.log'
+try { Start-Transcript -Path $SetupLog -Append | Out-Null } catch { }
+# Pass log dir to restore.ps1 so per-package logs go here too.
+# restore.ps1 won't start its own transcript when it sees this.
+$env:SETUP_RUN_LOG_DIR = $RunLogDir
+Write-Host "Log file: $SetupLog" -ForegroundColor DarkGray
+Write-Host ""
+
+# Guarantee we always close the transcript on error / ctrl-c paths.
+trap {
+    try { Stop-Transcript | Out-Null } catch { }
+    Remove-Item Env:SETUP_RUN_LOG_DIR -ErrorAction SilentlyContinue
+    break
+}
+
 # --- Grant ourselves all permissions (Windows equivalent of `chmod 777`) ---
 # Strip Mark-of-the-Web from every script in this folder so a freshly
 # downloaded zip runs without "do you want to run this file?" prompts,
@@ -183,14 +203,16 @@ if (-not $SkipPhase2) {
         Write-Host "  Fallback 2: downloading Git installer directly from git-scm.com ..." -ForegroundColor Yellow
         try {
             $api = Invoke-RestMethod -Uri 'https://api.github.com/repos/git-for-windows/git/releases/latest' `
-                -UseBasicParsing -Headers @{ 'User-Agent' = 'System-Setup' }
+                -UseBasicParsing -Headers @{ 'User-Agent' = 'System-Setup' } -TimeoutSec 30
             $asset = $api.assets | Where-Object {
                 $_.name -like '*-64-bit.exe' -and $_.name -notlike '*Portable*' -and $_.name -notlike '*MinGit*'
             } | Select-Object -First 1
             if ($asset) {
                 $installerPath = Join-Path $env:TEMP $asset.name
                 Write-Host "    downloading: $($asset.browser_download_url)" -ForegroundColor DarkGray
-                Invoke-WebRequest -Uri $asset.browser_download_url -OutFile $installerPath -UseBasicParsing
+                # 5-minute hard ceiling so a flaky network can't hang the script.
+                Invoke-WebRequest -Uri $asset.browser_download_url -OutFile $installerPath `
+                    -UseBasicParsing -TimeoutSec 300
                 Write-Host "    running silent installer ..." -ForegroundColor DarkGray
                 $proc = Start-Process -FilePath $installerPath `
                     -ArgumentList '/VERYSILENT', '/NORESTART', '/NOCANCEL', '/SP-', '/SUPPRESSMSGBOXES' `
@@ -253,7 +275,10 @@ See the failure log: $ScriptDir\git-fallback-install.log
     $bootstrapDirPosix = ConvertTo-PosixPath $ScriptDir
 
     # -c is enough; --login + -i would emit job-control warnings without a TTY.
-    & $bashExe -c "cd '$bootstrapDirPosix' && bash '$bootstrapPosix'"
+    # Tee bash output into our run log so Phase 2 is captured too.
+    $bashLog = Join-Path $RunLogDir 'bootstrap-dev.log'
+    & $bashExe -c "cd '$bootstrapDirPosix' && bash '$bootstrapPosix' 2>&1" |
+        Tee-Object -FilePath $bashLog
     $bashExit = $LASTEXITCODE
 
     Remove-Item Env:SETUP_GIT_NAME, Env:SETUP_GIT_EMAIL, Env:SETUP_SKIP_PHASE1 -ErrorAction SilentlyContinue
@@ -287,7 +312,10 @@ if (Test-Path $pubKeyPath) {
     Write-Host ""
 }
 
-if ($Host.Name -eq 'ConsoleHost' -and -not $env:WT_SESSION) {
-    Write-Host "Press Enter to exit..." -ForegroundColor DarkGray
-    [void][System.Console]::ReadLine()
-}
+Write-Host "Log file: $SetupLog" -ForegroundColor DarkGray
+Write-Host "  Per-package logs: $RunLogDir\packages\" -ForegroundColor DarkGray
+Write-Host ""
+
+try { Stop-Transcript | Out-Null } catch { }
+Remove-Item Env:SETUP_RUN_LOG_DIR -ErrorAction SilentlyContinue
+

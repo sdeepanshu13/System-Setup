@@ -112,8 +112,14 @@ echo "🔍 Detected environment: $ENV_TYPE"
 # If empty/unset, all categories are enabled (standalone run).
 SELECTED="${SETUP_CATEGORIES:-1,2,3,4,5,6,7,8,9,10,11,12,13}"
 category_enabled() {
-    # Usage: category_enabled 8  (returns 0 if category 8 is selected)
     echo ",$SELECTED," | grep -q ",$1,"
+}
+
+# Granular feature flags (from the GUI). Comma-separated list of flags.
+# If empty/unset, all features are enabled (standalone or -Unattended run).
+FEATURES="${SETUP_FEATURES:-zsh,omp,ompcmd,nerdfont,wsl,hyperv,containers,sandbox,netfx3,hypplat,gitssh,vscode,npm,pipx,rust,golang,maven,gradle}"
+feature_enabled() {
+    echo ",$FEATURES," | grep -q ",$1,"
 }
 
 # ---------------------------

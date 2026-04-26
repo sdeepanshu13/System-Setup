@@ -1,0 +1,22 @@
+# Build output (uploaded to GitHub Releases, not committed)
+dist/
+
+# Per-run logs
+Windows/logs/
+
+# Generated files
+Windows/github-ssh-pubkey.txt
+Windows/git-fallback-install.log
+Windows/CodeSigning.cer
+
+# OS junk
+Thumbs.db
+Desktop.ini
+.DS_Store
+
+# Editor files
+*.swp
+*.swo
+*~
+.vscode/
+.idea/

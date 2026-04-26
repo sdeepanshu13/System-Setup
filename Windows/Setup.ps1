@@ -206,35 +206,65 @@ function Show-DefaultShellMenu {
 }
 
 if (-not $Unattended) {
-    Show-SetupMenu -cats $allCategories
-    $shellChoice = Show-DefaultShellMenu
+    # Launch the GUI picker (Windows Forms with checkboxes + radio buttons).
+    $uiScript = Join-Path $ScriptDir 'Setup-UI.ps1'
+    if (Test-Path $uiScript) {
+        Write-Host "Opening setup configuration window..." -ForegroundColor Cyan
+        & $uiScript
+        if ($LASTEXITCODE -ne 0) {
+            Write-Host "Setup cancelled by user." -ForegroundColor Yellow
+            try { Stop-Transcript | Out-Null } catch { }
+            exit 0
+        }
+        $shellChoice = $env:SETUP_DEFAULT_SHELL
+        # $env:SETUP_CATEGORIES is already set by the UI script.
+    }
+    else {
+        # Fallback to console menu if GUI script is missing.
+        Show-SetupMenu -cats $allCategories
+        $shellChoice = Show-DefaultShellMenu
+        $env:SETUP_DEFAULT_SHELL = $shellChoice
+    }
 }
 else {
-    $shellChoice = '1'  # default to Git Bash + Zsh in unattended mode
+    $shellChoice = '1'
+    $env:SETUP_DEFAULT_SHELL = '1'
+    $env:SETUP_CATEGORIES = '1,2,3,4,5,6,7,8,9,10,11,12,13'
 }
 
-# Pass the shell choice to bootstrap-dev.sh
-$env:SETUP_DEFAULT_SHELL = $shellChoice
-
 # Build the selected set for downstream scripts.
-$selectedIds = ($allCategories | Where-Object { $_.On } | ForEach-Object { $_.Id }) -join ','
-$env:SETUP_CATEGORIES = $selectedIds
+# $env:SETUP_CATEGORIES is now set (by GUI, console fallback, or -Unattended).
+$selectedIds = $env:SETUP_CATEGORIES
+if ([string]::IsNullOrEmpty($selectedIds)) {
+    Write-Host "No categories selected. Nothing to do." -ForegroundColor Yellow
+    try { Stop-Transcript | Out-Null } catch { }
+    exit 0
+}
+$catIdList = $selectedIds -split ',' | ForEach-Object { [int]$_.Trim() }
 
-# Map selected winget groups for restore.ps1.
-$selectedWingetGroups = ($allCategories | Where-Object { $_.On -and $_.WingetGroup } |
-    ForEach-Object { $_.WingetGroup }) -join ','
+# Map selected category IDs to winget groups for restore.ps1.
+$catToWingetGroup = @{
+    1  = 'Dev Tools'
+    2  = 'Languages,Other'
+    3  = 'Browsers'
+    4  = 'CLI / Infra'
+    5  = 'Productivity'
+    6  = 'Media / Misc'
+    7  = 'Runtimes'
+}
+$selectedWingetGroups = ($catIdList | Where-Object { $catToWingetGroup.ContainsKey($_) } |
+    ForEach-Object { $catToWingetGroup[$_] }) -join ','
 $env:SETUP_WINGET_GROUPS = $selectedWingetGroups
 
 # Determine phase skips from selections.
-$hasWingetCategories = ($allCategories | Where-Object { $_.On -and $_.WingetGroup }).Count -gt 0
+$hasWingetCategories = $selectedWingetGroups.Length -gt 0
 if (-not $hasWingetCategories) { $SkipPhase1 = $true }
 
-$catIds = $allCategories | Where-Object { $_.On } | ForEach-Object { $_.Id }
-$hasPhase2 = ($catIds | Where-Object { $_ -in @(8,9,11,12,13) }).Count -gt 0
+$hasPhase2 = ($catIdList | Where-Object { $_ -in @(8,9,11,12,13) }).Count -gt 0
 if (-not $hasPhase2) { $SkipPhase2 = $true }
 
 Write-Host ""
-Write-Host ("Selected: {0} of {1} categories" -f @($catIds).Count, $allCategories.Count) -ForegroundColor Cyan
+Write-Host ("Selected: {0} of 13 categories" -f $catIdList.Count) -ForegroundColor Cyan
 Write-Host ""
 
 # --- Phase 1: winget packages ----------------------------
@@ -252,7 +282,7 @@ else {
 }
 
 # --- Phase 1b: Windows Optional Features -----------------
-if ($catIds -contains 10) {
+if ($catIdList -contains 10) {
     $featuresScript = Join-Path $ScriptDir 'Enable-WindowsFeatures.ps1'
     if (Test-Path $featuresScript) {
         Write-Host ""

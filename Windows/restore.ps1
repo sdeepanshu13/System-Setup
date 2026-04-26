@@ -194,11 +194,23 @@ if ($toInstall.Count -eq 0) {
 # Replace $packages with the filtered list for the rest of the script.
 $packages = $toInstall
 
-# --- Category filter: only install selected groups -------
-# When invoked via Setup.ps1's menu, SETUP_WINGET_GROUPS contains the
-# comma-separated winget category names the user chose. If set, drop any
-# package whose category isn't in the list (priority packages are always kept).
-if ($env:SETUP_WINGET_GROUPS) {
+# --- Package filter: only install what the user selected -------
+# SETUP_SELECTED_PACKAGES (from the GUI) contains exact winget IDs.
+# SETUP_WINGET_GROUPS (from the console fallback) contains category names.
+# If neither is set, install everything.
+if ($env:SETUP_SELECTED_PACKAGES) {
+    $allowedPkgs = $env:SETUP_SELECTED_PACKAGES -split ',' | ForEach-Object { $_.Trim() }
+    $prioritySet = @('Git.Git','GitHub.cli','Microsoft.WindowsTerminal','Microsoft.PowerShell')
+    $beforeCount = $packages.Count
+    $packages = $packages | Where-Object {
+        $prioritySet -contains $_ -or $allowedPkgs -contains $_
+    }
+    $droppedCount = $beforeCount - $packages.Count
+    if ($droppedCount -gt 0) {
+        Write-Host ("  Filtered out {0} package(s) not selected in UI." -f $droppedCount) -ForegroundColor DarkGray
+    }
+}
+elseif ($env:SETUP_WINGET_GROUPS) {
     $allowedGroups = $env:SETUP_WINGET_GROUPS -split ',' | ForEach-Object { $_.Trim() }
     $prioritySet   = @('Git.Git','GitHub.cli','Microsoft.WindowsTerminal','Microsoft.PowerShell')
     $beforeCount   = $packages.Count

@@ -19,7 +19,7 @@ jobs:
         shell: pwsh
         run: |
           $distDir = 'dist'
-          $zipDir  = "$distDir\System-Setup"
+          $zipDir  = "$distDir\staging"
           $hiddenDir = "$zipDir\.setup"
           if (Test-Path $distDir) { Remove-Item $distDir -Recurse -Force }
           New-Item -ItemType Directory -Path $hiddenDir -Force | Out-Null
@@ -27,7 +27,7 @@ jobs:
           # Setup.cmd goes at the root (visible to user)
           Copy-Item 'Windows\Setup.cmd' $zipDir
 
-          # Everything else goes in the hidden .setup folder
+          # Everything else goes in .setup
           $files = @(
             'Windows\Setup.ps1',
             'Windows\Setup-UI.ps1',
@@ -44,10 +44,8 @@ jobs:
             Copy-Item $f $hiddenDir
           }
 
-          # Mark .setup as hidden
-          (Get-Item $hiddenDir).Attributes = 'Hidden,Directory'
-
-          Compress-Archive -Path $zipDir -DestinationPath "$distDir\System-Setup.zip" -Force
+          # Zip the CONTENTS (not the folder) so extraction gives flat files
+          Compress-Archive -Path "$zipDir\*" -DestinationPath "$distDir\System-Setup.zip" -Force
 
           $hash = (Get-FileHash "$distDir\System-Setup.zip" -Algorithm SHA256).Hash
           $size = '{0:N1} MB' -f ((Get-Item "$distDir\System-Setup.zip").Length / 1MB)

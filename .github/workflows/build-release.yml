@@ -1,0 +1,54 @@
+name: Build and Release Setup.exe
+
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install ps2exe
+        shell: pwsh
+        run: |
+          Install-Module ps2exe -Scope CurrentUser -Force -Repository PSGallery
+
+      - name: Build Setup.exe
+        shell: pwsh
+        run: |
+          cd Windows
+          .\Build-Exe.ps1
+
+      - name: Get version tag
+        id: version
+        shell: bash
+        run: |
+          # Auto-increment: count commits on main
+          COUNT=$(git rev-list --count HEAD)
+          SHORT=$(git rev-parse --short HEAD)
+          TAG="v1.0.${COUNT}"
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "name=v1.0.${COUNT} (${SHORT})" >> "$GITHUB_OUTPUT"
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.version.outputs.tag }}
+          name: ${{ steps.version.outputs.name }}
+          body: |
+            **Download `Setup.exe` below and double-click it.**
+
+            Auto-built from commit ${{ github.sha }}.
+
+            See [README](https://github.com/${{ github.repository }}#readme) for details.
+          files: dist/Setup.exe
+          make_latest: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

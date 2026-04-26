@@ -20,12 +20,15 @@ jobs:
         run: |
           $distDir = 'dist'
           $zipDir  = "$distDir\System-Setup"
+          $hiddenDir = "$zipDir\.setup"
           if (Test-Path $distDir) { Remove-Item $distDir -Recurse -Force }
-          New-Item -ItemType Directory -Path $zipDir -Force | Out-Null
+          New-Item -ItemType Directory -Path $hiddenDir -Force | Out-Null
 
-          # Copy only the files users need (no .git, no build scripts, no dev docs)
+          # Setup.cmd goes at the root (visible to user)
+          Copy-Item 'Windows\Setup.cmd' $zipDir
+
+          # Everything else goes in the hidden .setup folder
           $files = @(
-            'Windows\Setup.cmd',
             'Windows\Setup.ps1',
             'Windows\Setup-UI.ps1',
             'Windows\restore.ps1',
@@ -38,18 +41,11 @@ jobs:
             'Windows\zsh-gitbash.tar.gz'
           )
           foreach ($f in $files) {
-            Copy-Item $f $zipDir
+            Copy-Item $f $hiddenDir
           }
 
-          # Add a simple readme inside the zip
-          @"
-          System-Setup
-          =============
-          Double-click Setup.cmd to start.
-          A GUI will open where you pick what to install.
-
-          https://github.com/${{ github.repository }}
-          "@ | Set-Content "$zipDir\README.txt"
+          # Mark .setup as hidden
+          (Get-Item $hiddenDir).Attributes = 'Hidden,Directory'
 
           Compress-Archive -Path $zipDir -DestinationPath "$distDir\System-Setup.zip" -Force
 

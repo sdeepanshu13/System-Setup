@@ -337,7 +337,8 @@ if ($Sequential) {
         --accept-package-agreements `
         --accept-source-agreements `
         --ignore-unavailable `
-        --disable-interactivity
+        --disable-interactivity `
+        --override '/norestart REBOOT=ReallySuppress'
 }
 else {
     # Prefer ThreadJob (lightweight). Fall back to Start-Job if unavailable.

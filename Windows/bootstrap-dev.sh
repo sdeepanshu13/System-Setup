@@ -720,7 +720,7 @@ PSPROFILE
     # Install Clink if not found (via winget)
     if [[ -z "$CLINK_EXE" ]]; then
         echo "    Installing Clink for CMD support..."
-        powershell.exe -NoProfile -Command "winget install --id chrisant996.Clink --exact --silent --accept-package-agreements --accept-source-agreements --source winget" 2>/dev/null || true
+        powershell.exe -NoProfile -Command "winget install --id chrisant996.Clink --exact --silent --accept-package-agreements --accept-source-agreements --source winget --override '/norestart REBOOT=ReallySuppress'" 2>/dev/null || true
     fi
 
     # Write Clink oh-my-posh autostart script

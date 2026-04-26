@@ -107,6 +107,15 @@ echo "============================================="
 ENV_TYPE=$(detect_environment)
 echo "🔍 Detected environment: $ENV_TYPE"
 
+# --- Category selection (passed from Setup.ps1 menu) ---
+# SETUP_CATEGORIES is a comma-separated list of selected category IDs.
+# If empty/unset, all categories are enabled (standalone run).
+SELECTED="${SETUP_CATEGORIES:-1,2,3,4,5,6,7,8,9,10,11,12,13}"
+category_enabled() {
+    # Usage: category_enabled 8  (returns 0 if category 8 is selected)
+    echo ",$SELECTED," | grep -q ",$1,"
+}
+
 # ---------------------------
 # 0) Install winget packages (Phase 1)
 # ---------------------------
@@ -135,6 +144,7 @@ else
     echo "⚠️  restore.ps1 not found — skipping winget package install."
 fi
 
+if category_enabled 13; then
 echo "🔧 Phase 2: Git & SSH setup"
 echo ""
 
@@ -235,7 +245,11 @@ else
 fi
 
 echo "✅ Phase 2 complete (Git & SSH)."
+fi  # end category 13 (Git & SSH)
+
 echo ""
+
+if category_enabled 8; then
 echo "🔧 Phase 3: Shell & dotfiles setup"
 echo ""
 
@@ -280,6 +294,36 @@ clone_if_missing "https://github.com/zsh-users/zsh-autosuggestions.git" \
 
 clone_if_missing "https://github.com/zsh-users/zsh-syntax-highlighting.git" \
     "$ZSH_CUSTOM_DIR/plugins/zsh-syntax-highlighting" "zsh-syntax-highlighting"
+
+# Pre-download gitstatusd for MSYS2 so p10k doesn't fail on first launch
+# with "[ERROR]: gitstatus failed to initialize".
+P10K_DIR="$ZSH_CUSTOM_DIR/themes/powerlevel10k"
+GITSTATUS_DIR="$P10K_DIR/gitstatus"
+if [[ -d "$GITSTATUS_DIR" && "$ENV_TYPE" == "gitbash" ]]; then
+    GITSTATUS_BIN="$GITSTATUS_DIR/usrbin/gitstatusd"
+    if [[ ! -x "$GITSTATUS_BIN" ]]; then
+        echo "📦 Pre-downloading gitstatusd for MSYS2..."
+        # gitstatus ships a build script that downloads the correct binary.
+        (cd "$GITSTATUS_DIR" && bash -c './install' 2>/dev/null) || {
+            # Fallback: manually download the i686/x86_64 cygwin build.
+            ARCH="$(uname -m)"
+            TAG="$(cat "$GITSTATUS_DIR/build.info" 2>/dev/null | grep -oP 'version=\K.*' || echo 'v1.5.5')"
+            URL="https://github.com/romkatv/gitstatus/releases/download/$TAG/gitstatusd-cygwin_nt-10.0-$ARCH.tar.gz"
+            echo "  Trying: $URL"
+            if curl -fsSL "$URL" -o /tmp/gitstatusd.tar.gz 2>/dev/null; then
+                tar -xzf /tmp/gitstatusd.tar.gz -C "$GITSTATUS_DIR/usrbin/" 2>/dev/null || true
+                rm -f /tmp/gitstatusd.tar.gz
+            fi
+        }
+        if [[ -x "$GITSTATUS_BIN" ]] || ls "$GITSTATUS_DIR/usrbin/"gitstatusd* &>/dev/null; then
+            echo "  ✅ gitstatusd ready."
+        else
+            echo "  ⚠️  gitstatusd download failed. Run 'exec zsh' after reboot to retry."
+        fi
+    else
+        echo "  ✅ gitstatusd already present."
+    fi
+fi
 
 fi  # end ZSH_AVAILABLE (sections 4-5)
 
@@ -353,19 +397,24 @@ deploy_dotfile "$ZSHRC_SRC" ".zshrc"
 deploy_dotfile "$P10K_SRC"  ".p10k.zsh"
 
 # ---------------------------
-# 8) Add Git Bash profile to Windows Terminal & make it default
+# 8) Add Git Bash profile to Windows Terminal & set default per user choice
 # ---------------------------
+# SETUP_DEFAULT_SHELL: 1=Git Bash+Zsh, 2=PowerShell 7, 3=PowerShell 5, 4=CMD, 5=Keep current
+SHELL_CHOICE="${SETUP_DEFAULT_SHELL:-1}"
 WT_SETTINGS_PATH="$HOME/AppData/Local/Packages/Microsoft.WindowsTerminal_8wekyb3d8bbwe/LocalState/settings.json"
 GIT_ROOT_POSIX="$(find_git_root 2>/dev/null || true)"
 
-if [[ -f "$WT_SETTINGS_PATH" && -n "$GIT_ROOT_POSIX" ]]; then
-    GIT_ROOT_WIN="$(cygpath -w "$GIT_ROOT_POSIX")"
+if [[ -f "$WT_SETTINGS_PATH" ]]; then
+    GIT_ROOT_WIN=""
+    [[ -n "$GIT_ROOT_POSIX" ]] && GIT_ROOT_WIN="$(cygpath -w "$GIT_ROOT_POSIX")"
     WIN_WT_PATH="$(cygpath -w "$WT_SETTINGS_PATH")"
-    echo "🖥️  Configuring Windows Terminal (Git Bash profile + default + font + elevate)..."
+    echo "🖥️  Configuring Windows Terminal (profiles + font + default=$SHELL_CHOICE)..."
     powershell.exe -NoProfile -ExecutionPolicy Bypass -Command "
         \$path = '$WIN_WT_PATH'
         \$gitDir = '$GIT_ROOT_WIN'
-        # One-time backup (don't pile up a backup per run).
+        \$shellChoice = '$SHELL_CHOICE'
+
+        # One-time backup
         \$backup = \$path + '.systemsetup.backup'
         if (-not (Test-Path \$backup)) {
             Copy-Item \$path \$backup -ErrorAction SilentlyContinue
@@ -379,46 +428,70 @@ if [[ -f "$WT_SETTINGS_PATH" && -n "$GIT_ROOT_POSIX" ]]; then
         # Apply MesloLGS NF font to all profiles via defaults
         \$s.profiles.defaults | Add-Member -NotePropertyName font -NotePropertyValue ([PSCustomObject]@{ face = 'MesloLGS NF'; size = 11 }) -Force
 
-        \$bashExe = Join-Path \$gitDir 'bin\\bash.exe'
-        \$icon    = Join-Path \$gitDir 'mingw64\\share\\git\\git-for-windows.ico'
+        # --- Ensure Git Bash profile exists (even if not the default) ---
         \$gitBashGuid = '{00000000-0000-0000-ba54-000000000001}'
-        # Use single quotes inside the JSON-bound string -- Windows accepts
-        # them around a path with spaces and we avoid backslash-escaping.
-        \$cmdLine = '\"' + \$bashExe + '\" --login -i'
+        if (\$gitDir) {
+            \$bashExe = Join-Path \$gitDir 'bin\\bash.exe'
+            \$icon    = Join-Path \$gitDir 'mingw64\\share\\git\\git-for-windows.ico'
+            \$cmdLine = '\"' + \$bashExe + '\" --login -i'
 
-        \$existing = \$s.profiles.list | Where-Object { \$_.name -eq 'Git Bash' -or \$_.guid -eq \$gitBashGuid }
-        if (\$existing) {
-            \$existing | Add-Member -NotePropertyName guid              -NotePropertyValue \$gitBashGuid -Force
-            \$existing | Add-Member -NotePropertyName name              -NotePropertyValue 'Git Bash'   -Force
-            \$existing | Add-Member -NotePropertyName commandline       -NotePropertyValue \$cmdLine    -Force
-            \$existing | Add-Member -NotePropertyName icon              -NotePropertyValue \$icon       -Force
-            \$existing | Add-Member -NotePropertyName startingDirectory -NotePropertyValue '%USERPROFILE%' -Force
-            \$existing | Add-Member -NotePropertyName elevate           -NotePropertyValue \$true       -Force
-            Write-Host '  Updated existing Git Bash profile (elevate=true).'
-        } else {
-            \$gb = [PSCustomObject]@{
-                guid              = \$gitBashGuid
-                name              = 'Git Bash'
-                commandline       = \$cmdLine
-                icon              = \$icon
-                startingDirectory = '%USERPROFILE%'
-                elevate           = \$true
+            \$existing = \$s.profiles.list | Where-Object { \$_.name -eq 'Git Bash' -or \$_.guid -eq \$gitBashGuid }
+            if (\$existing) {
+                \$existing | Add-Member -NotePropertyName guid              -NotePropertyValue \$gitBashGuid -Force
+                \$existing | Add-Member -NotePropertyName name              -NotePropertyValue 'Git Bash'   -Force
+                \$existing | Add-Member -NotePropertyName commandline       -NotePropertyValue \$cmdLine    -Force
+                \$existing | Add-Member -NotePropertyName icon              -NotePropertyValue \$icon       -Force
+                \$existing | Add-Member -NotePropertyName startingDirectory -NotePropertyValue '%USERPROFILE%' -Force
+                \$existing | Add-Member -NotePropertyName elevate           -NotePropertyValue \$true       -Force
+            } else {
+                \$gb = [PSCustomObject]@{
+                    guid              = \$gitBashGuid
+                    name              = 'Git Bash'
+                    commandline       = \$cmdLine
+                    icon              = \$icon
+                    startingDirectory = '%USERPROFILE%'
+                    elevate           = \$true
+                }
+                \$s.profiles.list = @(\$s.profiles.list) + \$gb
             }
-            # Force list to a real array before appending.
-            \$listArr = @(\$s.profiles.list) + \$gb
-            \$s.profiles.list = \$listArr
-            Write-Host '  Added Git Bash profile (elevate=true).'
+            Write-Host '  Git Bash profile ready (elevate=true).'
         }
 
-        # Make Git Bash the default profile
-        \$s | Add-Member -NotePropertyName defaultProfile -NotePropertyValue \$gitBashGuid -Force
-        Write-Host '  Set Git Bash as default profile.'
+        # --- Set defaultProfile based on user's choice ---
+        # Well-known GUIDs used by Windows Terminal:
+        #   PS7:  {574e775e-4f2a-5b96-ac1e-a2962a402336}
+        #   PS5:  {61c54bbd-c2c6-5271-96e7-009a87ff44bf}
+        #   CMD:  {0caa0dad-35be-5f56-a8ff-afceeeaa6101}
+        switch (\$shellChoice) {
+            '1' {
+                \$s | Add-Member -NotePropertyName defaultProfile -NotePropertyValue \$gitBashGuid -Force
+                Write-Host '  Default profile: Git Bash + Zsh'
+            }
+            '2' {
+                \$ps7Guid = '{574e775e-4f2a-5b96-ac1e-a2962a402336}'
+                # Also check if a PS7 profile exists with a different GUID
+                \$ps7 = \$s.profiles.list | Where-Object { \$_.name -like '*PowerShell*' -and \$_.source -eq 'Windows.Terminal.PowershellCore' } | Select-Object -First 1
+                if (\$ps7) { \$ps7Guid = \$ps7.guid }
+                \$s | Add-Member -NotePropertyName defaultProfile -NotePropertyValue \$ps7Guid -Force
+                Write-Host '  Default profile: PowerShell 7'
+            }
+            '3' {
+                \$s | Add-Member -NotePropertyName defaultProfile -NotePropertyValue '{61c54bbd-c2c6-5271-96e7-009a87ff44bf}' -Force
+                Write-Host '  Default profile: Windows PowerShell 5.1'
+            }
+            '4' {
+                \$s | Add-Member -NotePropertyName defaultProfile -NotePropertyValue '{0caa0dad-35be-5f56-a8ff-afceeeaa6101}' -Force
+                Write-Host '  Default profile: Command Prompt'
+            }
+            '5' {
+                Write-Host '  Default profile: unchanged (keeping current)'
+            }
+        }
 
         \$s | ConvertTo-Json -Depth 32 | Set-Content \$path -Encoding UTF8
     " 2>&1 || echo "  ⚠️  Could not update Windows Terminal settings automatically."
 else
-    [[ ! -f "$WT_SETTINGS_PATH" ]] && echo "ℹ️  Windows Terminal not installed — skipping profile setup."
-    [[ -z "$GIT_ROOT_POSIX" ]]      && echo "ℹ️  Git for Windows not found — skipping profile setup."
+    echo "ℹ️  Windows Terminal not installed -- skipping profile setup."
 fi
 
 # ---------------------------
@@ -471,10 +544,217 @@ else
     echo ""
     echo "⚠️  Skipping zsh setup (zsh not available)."
 fi  # end ZSH_AVAILABLE (sections 7-8)
+fi  # end category 8 (Shell: zsh + p10k)
 
 # ---------------------------
-# 9) Install VS Code extensions
+# 8c) Oh My Posh for PowerShell & CMD (category 9)
+#     Based on: Terminal-Icons, PSReadLine (auto-complete + ListView),
+#     useful aliases, Z directory jumper, and Oh My Posh prompt.
+#     Also sets up CMD via Clink.
 # ---------------------------
+if category_enabled 9; then
+    echo "🎨 Setting up Oh My Posh + productive PowerShell environment..."
+
+    # --- Install PowerShell modules (via pwsh if available, else powershell) ---
+    PWSH_BIN=""
+    for p in pwsh.exe powershell.exe; do
+        if command -v "$p" >/dev/null 2>&1; then PWSH_BIN="$p"; break; fi
+    done
+
+    if [[ -n "$PWSH_BIN" ]]; then
+        echo "  Installing PowerShell modules (Terminal-Icons, PSReadLine, Z)..."
+        "$PWSH_BIN" -NoProfile -Command '
+            Set-ExecutionPolicy -Scope CurrentUser -ExecutionPolicy RemoteSigned -Force -ErrorAction SilentlyContinue
+
+            $modules = @("Terminal-Icons", "PSReadLine", "Z")
+            foreach ($m in $modules) {
+                if (-not (Get-Module -Name $m -ListAvailable -ErrorAction SilentlyContinue)) {
+                    Write-Host "    [..]  $m"
+                    try {
+                        Install-Module -Name $m -Repository PSGallery -Scope CurrentUser -Force -AllowClobber -ErrorAction Stop
+                        Write-Host "    [ok]  $m"
+                    } catch {
+                        Write-Host "    [fail] $m - $($_.Exception.Message)"
+                    }
+                } else {
+                    Write-Host "    [skip] $m (already installed)"
+                }
+            }
+        ' 2>&1 || echo "  ⚠️  Module installation had errors (continuing)."
+    fi
+
+    # --- Write the PowerShell profile ---
+    PS_PROFILE_DIR="$HOME/Documents/PowerShell"
+    PS_PROFILE="$PS_PROFILE_DIR/Microsoft.PowerShell_profile.ps1"
+    PS5_PROFILE_DIR="$HOME/Documents/WindowsPowerShell"
+    PS5_PROFILE="$PS5_PROFILE_DIR/Microsoft.PowerShell_profile.ps1"
+    OMP_MARKER='# >>> System-Setup: PowerShell Profile >>>'
+
+    # The profile is written as a heredoc. Single-quotes around the delimiter
+    # prevent bash from expanding $variables — they stay as literal PowerShell.
+    read -r -d '' OMP_BLOCK << 'PSPROFILE'
+
+# >>> System-Setup: PowerShell Profile >>>
+# ═══════════════════════════════════════════════════════════
+#  Oh My Posh + Terminal-Icons + PSReadLine + Aliases
+#  Generated by System-Setup bootstrap. Edit freely.
+# ═══════════════════════════════════════════════════════════
+
+# --- Oh My Posh prompt ---------------------------------------------------
+if (Get-Command oh-my-posh -ErrorAction SilentlyContinue) {
+    oh-my-posh init pwsh --config "$env:POSH_THEMES_PATH\powerlevel10k_lean.omp.json" | Invoke-Expression
+}
+
+# --- Terminal Icons (file/folder icons in ls output) ----------------------
+if (Get-Module -Name Terminal-Icons -ListAvailable -ErrorAction SilentlyContinue) {
+    Import-Module Terminal-Icons
+}
+
+# --- PSReadLine (auto-complete, prediction, history) ----------------------
+if ($host.Name -eq 'ConsoleHost') {
+    if (Get-Module -Name PSReadLine -ListAvailable -ErrorAction SilentlyContinue) {
+        Import-Module PSReadLine
+
+        # Predict from history as you type
+        Set-PSReadLineOption -PredictionSource History
+        Set-PSReadLineOption -PredictionViewStyle ListView
+
+        # Tab completes inline (like bash)
+        Set-PSReadLineKeyHandler -Key Tab -Function MenuComplete
+
+        # Up/Down arrow filters history by what you've already typed
+        Set-PSReadLineKeyHandler -Key UpArrow   -Function HistorySearchBackward
+        Set-PSReadLineKeyHandler -Key DownArrow -Function HistorySearchForward
+
+        # No duplicate entries in history
+        Set-PSReadLineOption -HistoryNoDuplicates
+
+        # Editing mode: Windows (avoids conflicts with Ctrl+C, etc.)
+        Set-PSReadLineOption -EditMode Windows
+
+        # Ctrl+D deletes char (like bash); exit on empty line
+        Set-PSReadLineKeyHandler -Chord 'Ctrl+d' -Function DeleteChar
+    }
+}
+
+# --- Z directory jumper ---------------------------------------------------
+if (Get-Module -Name Z -ListAvailable -ErrorAction SilentlyContinue) {
+    Import-Module Z
+}
+
+# --- Useful aliases -------------------------------------------------------
+Set-Alias -Name ll -Value Get-ChildItem -Force
+Set-Alias -Name g  -Value git -Force
+Set-Alias -Name grep -Value findstr -Force
+Set-Alias -Name ip -Value ipconfig -Force
+Set-Alias -Name tt -Value tree -Force
+
+# --- Useful functions (Linux-like) ----------------------------------------
+function which ($command) {
+    Get-Command -Name $command -ErrorAction SilentlyContinue |
+        Select-Object -ExpandProperty Path -ErrorAction SilentlyContinue
+}
+
+function head {
+    param($Path, $n = 10)
+    Get-Content $Path -Head $n
+}
+
+function tail {
+    param($Path, $n = 10, [switch]$f)
+    if ($f) { Get-Content $Path -Wait -Tail $n }
+    else    { Get-Content $Path -Tail $n }
+}
+
+function mkcd ($dir) {
+    New-Item -ItemType Directory -Path $dir -Force | Out-Null
+    Set-Location $dir
+}
+
+function hosts { notepad C:\Windows\System32\drivers\etc\hosts }
+
+function df { Get-Volume }
+
+function envs { Get-ChildItem env: | Sort-Object Name }
+
+function touch ($file) { if (Test-Path $file) { (Get-Item $file).LastWriteTime = Get-Date } else { New-Item $file -ItemType File } }
+
+# Remove Windows PowerShell 5.x aliases that shadow real curl/wget
+if (Test-Path Alias:curl) { Remove-Item Alias:curl -Force -ErrorAction SilentlyContinue }
+if (Test-Path Alias:wget) { Remove-Item Alias:wget -Force -ErrorAction SilentlyContinue }
+
+# --- Hide the startup logo ------------------------------------------------
+# (add -NoLogo to your WT profile commandline for a cleaner look)
+
+# <<< System-Setup: PowerShell Profile <<<
+PSPROFILE
+
+    for dir in "$PS_PROFILE_DIR" "$PS5_PROFILE_DIR"; do
+        mkdir -p "$dir" 2>/dev/null
+    done
+
+    for prof in "$PS_PROFILE" "$PS5_PROFILE"; do
+        if [[ -f "$prof" ]] && grep -qF "$OMP_MARKER" "$prof" 2>/dev/null; then
+            echo "  [skip] $(basename "$(dirname "$prof")") profile already configured."
+        else
+            echo "$OMP_BLOCK" >> "$prof"
+            echo "  ✅ $(basename "$(dirname "$prof")") profile configured."
+        fi
+    done
+
+    # --- CMD support via Clink -------------------------------------------
+    echo "  Setting up Oh My Posh for CMD (via Clink)..."
+    CLINK_EXE=""
+    if command -v clink >/dev/null 2>&1; then
+        CLINK_EXE="clink"
+    elif [[ -f "/c/Program Files (x86)/clink/clink_x64.exe" ]]; then
+        CLINK_EXE="/c/Program Files (x86)/clink/clink_x64.exe"
+    fi
+
+    # Install Clink if not found (via winget)
+    if [[ -z "$CLINK_EXE" ]]; then
+        echo "    Installing Clink for CMD support..."
+        powershell.exe -NoProfile -Command "winget install --id chrisant996.Clink --exact --silent --accept-package-agreements --accept-source-agreements --source winget" 2>/dev/null || true
+    fi
+
+    # Write Clink oh-my-posh autostart script
+    CLINK_DIR="$HOME/AppData/Local/clink"
+    if [[ -d "$CLINK_DIR" ]] || mkdir -p "$CLINK_DIR" 2>/dev/null; then
+        CLINK_LUA="$CLINK_DIR/oh-my-posh.lua"
+        CLINK_MARKER='-- System-Setup: oh-my-posh'
+        if [[ -f "$CLINK_LUA" ]] && grep -qF "$CLINK_MARKER" "$CLINK_LUA" 2>/dev/null; then
+            echo "    [skip] Clink oh-my-posh.lua already configured."
+        else
+            cat > "$CLINK_LUA" << 'CLINKLUA'
+-- System-Setup: oh-my-posh for CMD
+-- This file is loaded by Clink automatically on CMD startup.
+-- Uses POSH_THEMES_PATH env var with a fallback to the default install location.
+local themes = os.getenv("POSH_THEMES_PATH")
+if not themes then
+    local localappdata = os.getenv("LOCALAPPDATA") or ""
+    themes = localappdata .. "\\Programs\\oh-my-posh\\themes"
+end
+local config = themes .. "\\powerlevel10k_lean.omp.json"
+load(io.popen('oh-my-posh init cmd --config "' .. config .. '"'):read("*a"))()
+CLINKLUA
+            echo "    ✅ Clink oh-my-posh.lua written to $CLINK_DIR"
+        fi
+
+        # Enable Clink autosuggestions (like fish/zsh-autosuggestions)
+        if command -v clink >/dev/null 2>&1; then
+            clink set autosuggest.enable true 2>/dev/null || true
+            echo "    ✅ Clink autosuggestions enabled."
+        fi
+    fi
+
+    echo "  ✅ Oh My Posh ready for PowerShell + CMD. Open a new window to see it."
+    echo "     Browse themes: Get-PoshThemes (in PowerShell) or https://ohmyposh.dev/docs/themes"
+fi  # end category 9 (Oh My Posh)
+
+# ---------------------------
+# 9) Install VS Code extensions (category 11)
+# ---------------------------
+if category_enabled 11; then
 VSCODE_EXT_FILE="$SCRIPT_DIR/vscode-extensions.txt"
 if [[ -f "$VSCODE_EXT_FILE" ]] && command -v code &>/dev/null; then
     echo "🧩 Installing VS Code extensions..."
@@ -503,7 +783,40 @@ else
     [[ ! -f "${VSCODE_EXT_FILE:-}" ]] && echo "⚠️  vscode-extensions.txt not found — skipping." \
         || echo "⚠️  'code' command not found — skipping VS Code extensions."
 fi
+fi  # end category 11 (VS Code Extensions)
 
+# ---------------------------
+# PATH refresh: tools installed by winget (Phase 1) aren't visible in this
+# bash session because it inherited the pre-install PATH. Pull in the latest
+# Windows PATH from the registry so npm, go, rustup, python, java etc. are
+# all found.
+# ---------------------------
+if [[ "$ENV_TYPE" == "gitbash" ]]; then
+    echo "🔄 Refreshing PATH (picking up newly-installed tools)..."
+    # Read current Machine + User PATH from registry via PowerShell
+    FRESH_PATH="$(powershell.exe -NoProfile -Command '
+        $m = [Environment]::GetEnvironmentVariable("Path","Machine")
+        $u = [Environment]::GetEnvironmentVariable("Path","User")
+        ($m + ";" + $u)
+    ' 2>/dev/null | tr -d '\r')"
+    if [[ -n "$FRESH_PATH" ]]; then
+        # Convert Windows paths to MSYS2 paths and merge with existing
+        IFS=';' read -ra WDIRS <<< "$FRESH_PATH"
+        for d in "${WDIRS[@]}"; do
+            d="$(echo "$d" | sed 's/^ *//;s/ *$//')"
+            [[ -z "$d" ]] && continue
+            posix_d="$(cygpath -u "$d" 2>/dev/null || true)"
+            [[ -n "$posix_d" ]] && case ":$PATH:" in
+                *:"$posix_d":*) ;;
+                *) export PATH="$PATH:$posix_d" ;;
+            esac
+        done
+        hash -r 2>/dev/null || true
+        echo "  ✅ PATH updated."
+    fi
+fi
+
+if category_enabled 12; then
 # ---------------------------
 # 10) Install Node.js LTS via nvm
 # ---------------------------
@@ -572,17 +885,29 @@ for cand in python python3 py; do
     if command -v "$cand" >/dev/null 2>&1; then PYBIN="$cand"; break; fi
 done
 if [[ -n "$PYBIN" ]]; then
-    "$PYBIN" -m pip install --user --upgrade pip pipx >/dev/null 2>&1
+    echo "  Using: $PYBIN ($("$PYBIN" --version 2>&1))"
+    # Ensure pip is available, then install pipx
+    "$PYBIN" -m ensurepip --upgrade >/dev/null 2>&1 || true
+    "$PYBIN" -m pip install --user --upgrade --quiet pip pipx 2>/dev/null || true
     "$PYBIN" -m pipx ensurepath >/dev/null 2>&1 || true
+
+    # pipx installs to ~/.local/bin (or AppData on Windows) — add to PATH
+    PIPX_BIN="$HOME/.local/bin"
+    [[ -d "$APPDATA/Python/Scripts" ]] && PIPX_BIN="$(cygpath -u "$APPDATA/Python/Scripts")"
+    case ":$PATH:" in
+        *:"$PIPX_BIN":*) ;;
+        *) export PATH="$PATH:$PIPX_BIN" ;;
+    esac
+
     PIPX_TOOLS=(uv ruff black httpie poetry virtualenv)
     for tool in "${PIPX_TOOLS[@]}"; do
         if "$PYBIN" -m pipx list 2>/dev/null | grep -q "package $tool "; then
             echo "  [skip] $tool (already installed)"
         else
             echo "  [..]   $tool"
-            "$PYBIN" -m pipx install "$tool" >/dev/null 2>&1 \
+            "$PYBIN" -m pipx install "$tool" 2>&1 | tail -1 | grep -q 'installed' \
                 && echo "  [ok]   $tool" \
-                || echo "  [fail] $tool"
+                || echo "  [fail] $tool (may need: pip install --user pipx)"
         fi
     done
 else
@@ -625,15 +950,58 @@ fi
 set -e
 
 # ---------------------------
-# 10f) Java (verify only -- JDK installed by winget)
+# 10f) Java + Maven + Gradle
 # ---------------------------
+set +e
 if command -v java >/dev/null 2>&1; then
     echo "☕ Java: $(java -version 2>&1 | head -n1)"
-fi
 
-# ---------------------------
-# 11) (Reserved) Windows Terminal font is configured in section 8.
-# ---------------------------
+    # Maven (not in winget — download from Apache directly)
+    if command -v mvn >/dev/null 2>&1; then
+        echo "  [skip] Maven $(mvn --version 2>/dev/null | head -1 | grep -oP '[\d.]+')"
+    else
+        echo "  [..]   Installing Apache Maven..."
+        MVN_VER="3.9.9"
+        MVN_URL="https://dlcdn.apache.org/maven/maven-3/$MVN_VER/binaries/apache-maven-$MVN_VER-bin.zip"
+        MVN_HOME="/c/tools/maven"
+        mkdir -p "$MVN_HOME"
+        if curl -fsSL "$MVN_URL" -o /tmp/maven.zip 2>/dev/null; then
+            unzip -qo /tmp/maven.zip -d /tmp/maven 2>/dev/null
+            cp -rf /tmp/maven/apache-maven-*/* "$MVN_HOME/" 2>/dev/null || \
+                powershell.exe -NoProfile -Command "Start-Process -Verb RunAs -Wait -FilePath xcopy.exe -ArgumentList '/E','/Y','/I','C:\Users\$env:USERNAME\AppData\Local\Temp\maven\apache-maven-$MVN_VER','C:\tools\maven'" 2>/dev/null
+            rm -rf /tmp/maven /tmp/maven.zip
+            export PATH="$PATH:$MVN_HOME/bin"
+            echo "  [ok]   Maven $MVN_VER -> $MVN_HOME"
+        else
+            echo "  [fail] Maven download failed"
+        fi
+    fi
+
+    # Gradle (not in winget — download from Gradle directly)
+    if command -v gradle >/dev/null 2>&1; then
+        echo "  [skip] Gradle $(gradle --version 2>/dev/null | grep '^Gradle' | awk '{print $2}')"
+    else
+        echo "  [..]   Installing Gradle..."
+        GRADLE_VER="8.12"
+        GRADLE_URL="https://services.gradle.org/distributions/gradle-$GRADLE_VER-bin.zip"
+        GRADLE_HOME="/c/tools/gradle"
+        mkdir -p "$GRADLE_HOME"
+        if curl -fsSL "$GRADLE_URL" -o /tmp/gradle.zip 2>/dev/null; then
+            unzip -qo /tmp/gradle.zip -d /tmp/gradle 2>/dev/null
+            cp -rf /tmp/gradle/gradle-*/* "$GRADLE_HOME/" 2>/dev/null || \
+                powershell.exe -NoProfile -Command "Start-Process -Verb RunAs -Wait -FilePath xcopy.exe -ArgumentList '/E','/Y','/I','C:\Users\$env:USERNAME\AppData\Local\Temp\gradle\gradle-$GRADLE_VER','C:\tools\gradle'" 2>/dev/null
+            rm -rf /tmp/gradle /tmp/gradle.zip
+            export PATH="$PATH:$GRADLE_HOME/bin"
+            echo "  [ok]   Gradle $GRADLE_VER -> $GRADLE_HOME"
+        else
+            echo "  [fail] Gradle download failed"
+        fi
+    fi
+else
+    echo "⚠️  java not found -- skipping Maven/Gradle (JDK not installed yet)."
+fi
+set -e
+fi  # end category 12 (Language Tooling)
 
 # ---------------------------
 # Done

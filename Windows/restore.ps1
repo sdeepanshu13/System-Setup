@@ -61,7 +61,7 @@ if ($env:SETUP_RUN_LOG_DIR -and (Test-Path $env:SETUP_RUN_LOG_DIR)) {
     $RunLogDir = $env:SETUP_RUN_LOG_DIR
 }
 else {
-    # Running standalone — create our own log folder + transcript.
+    # Running standalone -- create our own log folder + transcript.
     $LogRoot   = Join-Path $ScriptDir 'logs'
     $RunStamp  = Get-Date -Format 'yyyyMMdd-HHmmss'
     $RunLogDir = Join-Path $LogRoot $RunStamp
@@ -194,6 +194,29 @@ if ($toInstall.Count -eq 0) {
 # Replace $packages with the filtered list for the rest of the script.
 $packages = $toInstall
 
+# --- Category filter: only install selected groups -------
+# When invoked via Setup.ps1's menu, SETUP_WINGET_GROUPS contains the
+# comma-separated winget category names the user chose. If set, drop any
+# package whose category isn't in the list (priority packages are always kept).
+if ($env:SETUP_WINGET_GROUPS) {
+    $allowedGroups = $env:SETUP_WINGET_GROUPS -split ',' | ForEach-Object { $_.Trim() }
+    $prioritySet   = @('Git.Git','GitHub.cli','Microsoft.WindowsTerminal','Microsoft.PowerShell')
+    $beforeCount   = $packages.Count
+    $packages = $packages | Where-Object {
+        $prioritySet -contains $_ -or $allowedGroups -contains (Get-Category $_)
+    }
+    $droppedCount = $beforeCount - $packages.Count
+    if ($droppedCount -gt 0) {
+        Write-Host ("  Filtered out {0} package(s) not in selected categories." -f $droppedCount) -ForegroundColor DarkGray
+    }
+}
+
+if ($packages.Count -eq 0) {
+    Write-Host "Nothing to install after filtering." -ForegroundColor Green
+    if ($script:OwnTranscript) { try { Stop-Transcript | Out-Null } catch { } }
+    exit 0
+}
+
 Write-Host "=============================================" -ForegroundColor Cyan
 Write-Host " Windows Software Restore" -ForegroundColor Cyan
 Write-Host "=============================================" -ForegroundColor Cyan
@@ -210,9 +233,18 @@ function Get-Category([string]$id) {
         'JetBrains.*'              { return 'Dev Tools' }
         'Docker.*'                 { return 'Dev Tools' }
         'Warp.*'                   { return 'Dev Tools' }
+        'JanDeDobbeleer.*'         { return 'Dev Tools' }
         'Python.*'                 { return 'Languages' }
         'CoreyButler.*'            { return 'Languages' }
         'Microsoft.DotNet.SDK*'    { return 'Languages' }
+        'EclipseAdoptium.*'        { return 'Languages' }
+        'GoLang.*'                 { return 'Languages' }
+        'Rustlang.*'               { return 'Languages' }
+        'OpenJS.*'                 { return 'Languages' }
+        'LLVM.*'                   { return 'Languages' }
+        'MartinStorsjo.*'          { return 'Languages' }
+        'Kitware.*'                { return 'Languages' }
+        'Ninja-build.*'            { return 'Languages' }
         'Microsoft.PowerShell'     { return 'CLI / Infra' }
         'Microsoft.WindowsTerminal' { return 'CLI / Infra' }
         'Microsoft.AzureCLI'       { return 'CLI / Infra' }

@@ -1,251 +1,220 @@
-# Windows Setup
+# Windows Setup -- Detailed Guide
 
-Automated, **production-ready** setup for a fresh Windows 10/11 dev machine. **One command** installs ~55 apps in parallel, enables Windows features (WSL/Hyper-V/Sandbox), configures Git Bash + zsh + Powerlevel10k, generates an SSH key, and sets up a polyglot dev environment (Node/React, Python, Java, Go, Rust, .NET, C/C++).
+This document covers everything the setup does, how each phase works, and how to customize it.
 
----
-
-## What's Included
-
-| File                        | Purpose                                                                          |
-| --------------------------- | -------------------------------------------------------------------------------- |
-| `Setup.cmd`                 | One-click launcher (avoids execution-policy issues)                              |
-| `Setup.ps1`                 | **Universal entry point** — auto-elevates, runs Phase 1 + 1b + 2, single log dir |
-| `restore.ps1`               | Phase 1 — installs all winget packages in parallel (skips already-installed)     |
-| `Enable-WindowsFeatures.ps1`| Phase 1b — enables WSL, Hyper-V, Containers, Windows Sandbox, .NET 3.5, etc.     |
-| `bootstrap-dev.sh`          | Phase 2 — Git config, SSH key, zsh, oh-my-zsh, p10k, fonts, dotfiles, dev tools  |
-| `Sign-Scripts.ps1`          | Optional — self-sign all `.ps1` files for stricter execution policies            |
-| `winget-packages.json`      | List of winget packages to install                                               |
-| `vscode-extensions.txt`     | List of VS Code extensions to restore                                            |
-| `zshrc-template`            | Optimized `.zshrc` for Git Bash + Powerlevel10k                                  |
-| `p10k-template`             | Powerlevel10k config (`~/.p10k.zsh`)                                             |
-| `zsh-gitbash.tar.gz`        | Bundled zsh binaries + DLLs that get extracted into `C:\Program Files\Git`       |
+For quick start instructions, see the [main README](../README.md).
 
 ---
 
-## Prerequisites
+## How the Setup Works
 
-- Windows 10 / 11
-- [winget](https://aka.ms/getwinget) (bundled with App Installer from the Microsoft Store on modern Windows)
-- Internet connection
-- An **Administrator** account — every script auto-elevates via UAC if needed.
+When you run `Setup.cmd`, three phases happen in order:
+
+### Phase 1 -- Install Software (restore.ps1)
+
+1. Resets the winget source cache (prevents stale-manifest failures)
+2. Checks what's already installed and **skips** those packages
+3. Installs priority packages first (Git, PowerShell 7, Windows Terminal, GitHub CLI) -- these are needed by later phases
+4. Installs everything else in **parallel** (5 at a time by default)
+5. Each package gets its own log file in `logs/<timestamp>/packages/`
+
+Only the categories you selected in the menu are installed. If you unchecked "Web Browsers", Chrome and Firefox are skipped.
+
+### Phase 1b -- Windows Features (Enable-WindowsFeatures.ps1)
+
+Runs only if you selected category 10. Enables:
+
+| Feature | Why |
+|---------|-----|
+| WSL + Virtual Machine Platform | Linux on Windows |
+| Hyper-V | Docker, Android emulators |
+| Hypervisor Platform | Third-party virtualization |
+| Containers | Docker native containers |
+| Windows Sandbox | Safe disposable VM for testing |
+| .NET 3.5 | Legacy app compatibility |
+| Print to PDF / XPS | Document creation |
+
+**Not enabled** (for security): SMB1, Telnet, TFTP, PowerShell v2, Internet Explorer.
+
+### Phase 2 -- Dev Environment (bootstrap-dev.sh)
+
+Runs in Git Bash. Only the sections matching your selected categories execute.
+
+| Category | What gets set up |
+|----------|-----------------|
+| **13: Git & SSH** | `git config` identity + sane defaults, ed25519 SSH key generation |
+| **8: Git Bash + Zsh** | Zsh extracted into Git for Windows, Oh My Zsh, Powerlevel10k, MesloLGS NF font, Windows Terminal profile, `.bashrc` auto-launch |
+| **9: Oh My Posh** | PowerShell modules (Terminal-Icons, PSReadLine, Z), PS profile with aliases/functions, Clink for CMD, Oh My Posh prompt on all shells |
+| **11: VS Code Extensions** | Installs extensions from `vscode-extensions.txt` in parallel |
+| **12: Language Tooling** | npm globals (React/TS/ESLint/Prettier), Python pipx tools (uv/ruff/poetry), Rust stable + clippy + rust-analyzer, Go workspace, Maven + Gradle |
 
 ---
 
-## Quick Start — pick your shell
+## The PowerShell Profile (Oh My Posh)
 
-> **Fresh Windows install?** Only PowerShell and Command Prompt are available out of the box. Git Bash is installed as part of Phase 1, so use **Option A** or **Option B** for the first run.
+When you select category 9 (Oh My Posh), the setup writes a full PowerShell profile to both `Documents\PowerShell\` (PS 7) and `Documents\WindowsPowerShell\` (PS 5.1).
 
-### Option A — `Setup.cmd` (recommended)
+**What's in it:**
 
-Double-click `Setup.cmd` in Explorer, or run from any shell:
-```cmd
-.\Setup.cmd
-```
-This wrapper calls `Setup.ps1` with `-ExecutionPolicy Bypass`, so you never see the *"file is not digitally signed"* error.
+| Feature | Description |
+|---------|-------------|
+| Oh My Posh | `powerlevel10k_lean` theme with Nerd Font icons, git status, etc. |
+| Terminal-Icons | File/folder type icons in `ls` / `Get-ChildItem` output |
+| PSReadLine | Auto-complete from history, ListView predictions, Tab = MenuComplete |
+| Z | Directory jumper -- `z Downloads` instead of `cd C:\Users\...\Downloads` |
+| Aliases | `ll` `g` `grep` `ip` `tt` `which` `head` `tail` `touch` `mkcd` `df` `hosts` `envs` |
+| curl/wget fix | Removes PS5's broken aliases that shadow real curl/wget |
 
-Pre-fill Git config to run **fully unattended**:
-```cmd
-.\Setup.cmd -GitName "Jane Doe" -GitEmail "jane@example.com"
-```
-
-### Option B — PowerShell directly
-
+**Change the Oh My Posh theme:**
 ```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -File .\Setup.ps1
+# List all available themes:
+Get-PoshThemes
+
+# Or browse: https://ohmyposh.dev/docs/themes
+
+# Edit your profile to change the theme:
+notepad $PROFILE
+# Change the --config path to your preferred theme
 ```
-
-If you just type `.\Setup.ps1` and get **"file ... is not digitally signed"**, do one of:
-```powershell
-Unblock-File .\Setup.ps1; .\Setup.ps1
-# or
-Set-ExecutionPolicy -Scope CurrentUser -ExecutionPolicy RemoteSigned -Force
-.\Setup.ps1
-```
-
-### Option C — Command Prompt (cmd.exe)
-
-```cmd
-cd C:\path\to\System-Setup\Windows
-.\Setup.cmd
-```
-
-### Option D — Git Bash (only if Git for Windows is already installed)
-
-```bash
-cd /c/path/to/System-Setup/Windows
-chmod +x bootstrap-dev.sh
-./bootstrap-dev.sh
-```
-
-> **Do not run from WSL.** The script targets the Windows side (winget, Windows Terminal, Git for Windows). Use Option A from PowerShell instead.
-
-### Don't have `git` yet?
-
-If you're on a brand-new machine without Git, you have two options to get the repo onto the box:
-
-1. **Install Git first**, then clone:
-   ```powershell
-   winget install --id Git.Git -e --accept-package-agreements --accept-source-agreements
-   git clone https://github.com/sdeepanshu13/System-Setup.git
-   cd System-Setup\Windows
-   .\Setup.cmd
-   ```
-2. **Download the ZIP** from https://github.com/sdeepanshu13/System-Setup → "Code" → "Download ZIP", extract it, then run `.\Setup.cmd` from the `Windows` folder.
 
 ---
 
-## What runs in each phase
+## CMD Support (via Clink)
 
-### Phase 1 — winget packages ([restore.ps1](restore.ps1))
-1. Auto-elevates to Administrator.
-2. Resets + refreshes the winget source cache (with a 120 s hard timeout so a stalled CDN can't hang the run).
-3. Pre-flight: snapshots installed packages and **skips already-installed** items (also probes disk for Git/VS Code/etc. that don't show up in `winget list`).
-4. **Phase A** — installs priority packages sequentially (`Git.Git`, `GitHub.cli`, `Microsoft.WindowsTerminal`, `Microsoft.PowerShell`).
-5. **Phase B** — installs everything else **in parallel** (default 5 at a time, configurable with `-Throttle`). Uses `Start-ThreadJob` if available, falls back to `Start-Job`.
-6. Hash-mismatch packages are auto-handled with `--ignore-security-hash`.
-7. If `Git.Git` is somehow still missing after Phase 1, `Setup.ps1` falls back to downloading the official Git for Windows installer directly from GitHub releases (with a 5-minute download timeout).
+CMD doesn't support custom prompts natively. The setup installs [Clink](https://chrisant996.github.io/clink/) which supercharges CMD with:
 
-**Bundled package categories** (`winget-packages.json`):
-- **Dev Tools**: VS Code, Visual Studio Enterprise, JetBrains Toolbox, GitHub Desktop, GitHub Copilot, Docker Desktop, Warp, VS 2022 Build Tools
-- **Languages**: Python 3.14, Node.js LTS + NVM, .NET SDK 10, Go, Rust (rustup), Java (Temurin 17 + 21), LLVM, MinGW, CMake, Ninja, Maven, Gradle
-- **CLI / Infra**: Azure CLI, PowerShell 7, Redis, WSL + Ubuntu 24.04
-- **Browsers**: Chrome, Firefox, Edge
-- **Productivity**: Teams, Office, OneDrive, Google Drive, Adobe Reader
-- **Media / Misc**: VLC, Unity Hub, Yubico, Samsung Smart Switch
-- **Runtimes**: .NET DesktopRuntime 8, AspNetCore 8, .NET Framework Dev Pack 4, VCRedist 2015+
+- Oh My Posh prompt (same `powerlevel10k_lean` theme)
+- Autosuggestions (like fish shell)
+- Better tab completion
 
-### Phase 1b — Windows Optional Features ([Enable-WindowsFeatures.ps1](Enable-WindowsFeatures.ps1))
-Enables (idempotent — already-on features are skipped):
-- **WSL** + Virtual Machine Platform (then `wsl --set-default-version 2` and `wsl --update`)
-- **Hyper-V** (full)
-- **Hypervisor Platform** (Docker / Android emulators)
-- **Containers**
-- **Windows Sandbox**
-- **.NET 3.5** + .NET 4 advanced services
-- **Print to PDF / XPS Services**
-- **Media Playback**
+The config is at `%LOCALAPPDATA%\clink\oh-my-posh.lua`.
 
-Deliberately **NOT** enabled (security hygiene): SMB1, Telnet, TFTP, SimpleTCP, DirectPlay, PowerShell v2, Internet Explorer.
+---
 
-### Phase 2 — Dev environment ([bootstrap-dev.sh](bootstrap-dev.sh))
-| # | Action |
-|---|--------|
-| 1 | `git config` identity + sane defaults (`init.defaultBranch=main`, `pull.rebase=true`, `core.autocrlf=true`, etc.) |
-| 2 | Generates ed25519 SSH key (skipped if already present) and writes pubkey to `github-ssh-pubkey.txt` |
-| 3 | Extracts bundled `zsh-gitbash.tar.gz` into `C:\Program Files\Git` (auto-elevates if needed) |
-| 4 | Installs Oh My Zsh (idempotent) |
-| 5 | Clones Powerlevel10k + zsh-autosuggestions + zsh-syntax-highlighting (shallow) |
-| 6 | Downloads & installs MesloLGS Nerd Font (4 weights) |
-| 7 | Deploys `~/.zshrc` and `~/.p10k.zsh` from templates (with backup-on-diff) |
-| 8 | Adds **Git Bash** profile to Windows Terminal, sets it as **default**, sets `elevate: true` so it always launches as admin, applies MesloLGS NF font to all profiles |
-| 8b | Adds `exec zsh` + UTF-8 codepage to `~/.bashrc` and writes a matching `~/.bash_profile` (idempotent, marker-guarded) |
-| 9 | Restores VS Code extensions from `vscode-extensions.txt` (parallel, throttled) |
-| 10 | Installs Node.js LTS via nvm (if installed) |
-| 10b | Installs global npm packages: `yarn`, `pnpm`, `typescript`, `ts-node`, `eslint`, `prettier`, `nodemon`, `serve`, `create-react-app`, `create-next-app`, `create-vite`, `vercel`, `wrangler`, `npm-check-updates` |
-| 10c | Installs Python tools via `pipx`: `uv`, `ruff`, `black`, `httpie`, `poetry`, `virtualenv` |
-| 10d | Installs Rust `stable` toolchain + `rustfmt`, `clippy`, `rust-analyzer` |
-| 10e | Initializes Go workspace (`~/go/{bin,src,pkg}`) and sets `GOPATH` |
+## Installed Packages
+
+**Dev Tools:** Git, GitHub CLI, GitHub Desktop, GitHub Copilot, VS Code, Visual Studio Enterprise, JetBrains Toolbox, Docker Desktop, Warp, Oh My Posh, Clink, VS 2022 Build Tools
+
+**Languages:** Python 3.14, Node.js LTS + NVM, .NET SDK 10, Java (Temurin 17 + 21), Go, Rust (rustup), LLVM, MinGW, CMake, Ninja
+
+**Cloud / CLI:** Azure CLI, PowerShell 7, Redis, WSL + Ubuntu 24.04
+
+**Browsers:** Chrome, Firefox, Edge (pre-installed)
+
+**Productivity:** Teams, Office 365, OneDrive, Google Drive, Adobe Reader
+
+**Media / Misc:** VLC, Unity Hub, Samsung SmartSwitch, YubiKey Manager, Remote Help
+
+**Runtimes:** .NET Desktop/AspNetCore 8, .NET Framework DevPack 4, VCRedist 2015+, ODBC 17, SQL CLR Types
+
+---
+
+## Default Terminal Options
+
+The setup asks which shell should open when you launch Windows Terminal:
+
+| Option | What happens |
+|--------|-------------|
+| **1. Git Bash + Zsh** | Git Bash profile with `exec zsh`, Powerlevel10k prompt, elevated by default |
+| **2. PowerShell 7** | `pwsh.exe` with Oh My Posh + PSReadLine + Terminal-Icons |
+| **3. PowerShell 5** | `powershell.exe` (built-in) with Oh My Posh |
+| **4. Command Prompt** | `cmd.exe` with Clink + Oh My Posh |
+| **5. Keep current** | Don't change the default |
+
+All profiles get the MesloLGS NF font applied automatically. The Git Bash profile is always created (even if not default) so it's available in the dropdown.
 
 ---
 
 ## Logging
 
-Every run produces a single timestamped folder under `Windows\logs\`:
+One log file per run, plus per-package logs:
+
 ```
-Windows\logs\20260426-115500\
-├── setup.log              ← Setup.ps1 + everything it called
-├── restore.log            ← Phase 1 winget transcript
-├── bootstrap-dev.log      ← Phase 2 bash output
-└── packages\
-    ├── Git.Git.log
-    ├── Microsoft.VisualStudioCode.log
-    └── ...
+Windows\logs\20260426-125500\
+  setup.log              <-- everything in one file
+  packages\
+    Git.Git.log
+    Docker.DockerDesktop.log
+    ...
 ```
-Transcripts are guaranteed-closed via `trap` blocks even on errors, ctrl-c, or early exits — you can always re-run cleanly.
 
 ---
 
-## Common Operations
+## Running Individual Scripts
 
 ```powershell
-# Skip Phase 1 (winget already done) — useful for re-running Phase 2 only:
-.\Setup.cmd -SkipPhase1
+# Just install packages:
+.\restore.ps1
 
-# Skip Phase 2 (just install software):
-.\Setup.cmd -SkipPhase2
-
-# Faster parallelism (more memory used, fewer minutes):
-.\Setup.cmd -Throttle 8
-
-# Preview packages without installing:
+# Just install packages, preview only:
 .\restore.ps1 -WhatIfMode
 
-# Enable Windows Features only:
-.\Enable-WindowsFeatures.ps1                       # default: WSL + Hyper-V + Sandbox
-.\Enable-WindowsFeatures.ps1 -IncludeIIS           # also IIS
-.\Enable-WindowsFeatures.ps1 -IncludeHyperV:$false # if you use VirtualBox/Android Studio
+# Just enable Windows features:
+.\Enable-WindowsFeatures.ps1
 
-# Self-sign all .ps1 scripts (optional, for AllSigned policy):
+# Enable Windows features + IIS:
+.\Enable-WindowsFeatures.ps1 -IncludeIIS
+
+# Disable Hyper-V (for VirtualBox users):
+.\Enable-WindowsFeatures.ps1 -IncludeHyperV:$false
+
+# Self-sign scripts (optional, for AllSigned policy):
 .\Sign-Scripts.ps1
+
+# Run Phase 2 standalone from Git Bash:
+chmod +x bootstrap-dev.sh
+./bootstrap-dev.sh
 ```
 
 ---
 
-## After Setup Completes
+## Customizing the Package List
 
-1. **Reboot once** — Windows Features (WSL, Hyper-V, Sandbox) require a restart to finalize.
-2. **Close all Windows Terminal windows** and reopen — the Git Bash default profile + `elevate: true` + MesloLGS NF font kick in only on a fresh launch.
-3. **Add the SSH key to GitHub**: https://github.com/settings/ssh/new
-   - The public key is also printed at the end of the run for direct copy-paste, and saved to `Windows\github-ssh-pubkey.txt`.
-4. Run `p10k configure` if you want to re-tune the Powerlevel10k prompt; otherwise the bundled `~/.p10k.zsh` is used.
-5. Sign into Chrome, Docker Desktop, JetBrains Toolbox, VS Code (Settings Sync), etc.
+Edit `winget-packages.json` to add or remove packages. The format is standard winget export:
 
----
+```json
+{
+    "PackageIdentifier": "YourApp.Name"
+}
+```
 
-## Troubleshooting
+Find package IDs: `winget search <name>` or browse https://winget.run
 
-| Symptom | Fix |
-|---|---|
-| `is not digitally signed` when running `.ps1` | Use `Setup.cmd` instead, or `Unblock-File .\Setup.ps1` |
-| `zsh.exe: error while loading shared libraries: msys-zsh-5.9.dll` | Old `zsh-gitbash.tar.gz` bundle — re-pull and rerun `.\Setup.cmd -SkipPhase1` |
-| Windows Terminal still uses old font / profile | Close **all** Terminal windows first, then reopen — settings are loaded once at startup |
-| `MSYSTEM: unbound variable` | You ran `bootstrap-dev.sh` from WSL. Run from Git Bash, or use `Setup.cmd` from PowerShell |
-| A winget package fails | Check `logs\<latest>\packages\<PackageId>.log`. Most failures are transient — just rerun `Setup.cmd`; already-installed packages are skipped |
-| `Git.Git` keeps failing with hash mismatch | Already mitigated with `--ignore-security-hash`; if it still fails, `Setup.ps1` Phase 2 will download the installer directly from git-scm.com |
-| Hyper-V conflicts with VirtualBox / Android emulator | Run `.\Enable-WindowsFeatures.ps1 -IncludeHyperV:$false` and reboot |
-| Script appears stuck on "Refreshing winget sources" | Hard timeout of 120 s now applies; if you see this on an old version, pull the latest |
+After editing, the next `.\Setup.cmd` run will install the new packages and skip existing ones.
 
 ---
 
-## Updating the bundled artifacts
+## Updating Bundled Files
 
-Re-export your current state into the repo:
+After you've customized your machine, save your current state back into the repo:
 
 ```powershell
-# winget packages snapshot
+# Snapshot installed packages:
 winget export -o winget-packages.json --accept-source-agreements
 
-# VS Code extensions
+# Snapshot VS Code extensions:
 code --list-extensions > vscode-extensions.txt
 ```
 
 ```bash
-# Bundle the current zsh + DLLs from Git Bash:
-cd "/c/Program Files/Git" && tar czf /c/path/to/System-Setup/Windows/zsh-gitbash.tar.gz \
+# Re-bundle zsh (if you upgraded it):
+cd "/c/Program Files/Git"
+tar czf /path/to/System-Setup/Windows/zsh-gitbash.tar.gz \
     usr/bin/zsh.exe usr/bin/zsh-5.9.exe usr/bin/msys-zsh-5.9.dll \
     usr/share/zsh etc/zsh usr/lib/zsh
 
-# Snapshot current dotfiles:
-cp ~/.zshrc    /c/path/to/System-Setup/Windows/zshrc-template
-cp ~/.p10k.zsh /c/path/to/System-Setup/Windows/p10k-template
+# Save dotfiles:
+cp ~/.zshrc   /path/to/System-Setup/Windows/zshrc-template
+cp ~/.p10k.zsh /path/to/System-Setup/Windows/p10k-template
 ```
 
 ---
 
-## Design Notes
+## Design Decisions
 
-- **Idempotent end-to-end** — every step checks "is this already done?" before acting. Re-running is always safe.
-- **Single log directory per run** — `Setup.ps1`, `restore.ps1`, and `bootstrap-dev.sh` all write into the same timestamped folder.
-- **Fail-loud, recover-gracefully** — Phase 1 failures are reported clearly with log paths; Phase 2 has its own Git fallback so it can still finish.
-- **No hidden state** — all bundled files (zsh, dotfiles, package list) live in the repo; no curl-piped-to-bash from random URLs (except Oh My Zsh's official installer).
-- **Security hygiene** — SMB1, Telnet, PowerShell v2, and other deprecated/insecure features are explicitly **not** enabled.
+- **Idempotent** -- every step checks if it's already done before acting. Safe to re-run.
+- **Single log file** -- `setup.log` captures everything via PowerShell transcript.
+- **Fail-loud, recover-gracefully** -- failures are reported with log paths. The script continues so you don't have to restart from scratch.
+- **PS 5.1 compatible** -- all `.ps1` files are pure ASCII (no Unicode that breaks the default parser).
+- **No curl-pipe-bash** -- all bundled files live in the repo (except Oh My Zsh's official installer).
+- **Security hygiene** -- dangerous Windows features (SMB1, Telnet, PS v2) are deliberately not enabled.

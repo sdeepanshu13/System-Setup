@@ -11,6 +11,12 @@
                     "PackageIdentifier": "GitHub.cli"
                 },
                 {
+                    "PackageIdentifier": "JanDeDobbeleer.OhMyPosh"
+                },
+                {
+                    "PackageIdentifier": "chrisant996.Clink"
+                },
+                {
                     "PackageIdentifier": "GitHub.GitHubDesktop"
                 },
                 {
@@ -135,12 +141,6 @@
                 },
                 {
                     "PackageIdentifier": "EclipseAdoptium.Temurin.17.JDK"
-                },
-                {
-                    "PackageIdentifier": "Apache.Maven"
-                },
-                {
-                    "PackageIdentifier": "Gradle.Gradle"
                 },
                 {
                     "PackageIdentifier": "OpenJS.NodeJS.LTS"

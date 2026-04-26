@@ -29,7 +29,8 @@ param(
     [string]$GitEmail,
     [int]$Throttle = 5,
     [switch]$SkipPhase1,
-    [switch]$SkipPhase2
+    [switch]$SkipPhase2,
+    [switch]$Unattended
 )
 
 $ErrorActionPreference = 'Continue'
@@ -101,6 +102,141 @@ try {
 }
 catch { }
 
+# =====================================================================
+# INTERACTIVE SETUP MENU -- let the user pick what to install
+# =====================================================================
+# Categories map to winget groups (restore.ps1) and bootstrap sections.
+# Skip the menu with -Unattended (installs everything).
+
+$allCategories = @(
+    [pscustomobject]@{ Id= 1; Name='Developer Tools & IDEs';  Desc='Git, VS Code, Visual Studio, JetBrains, Docker, GitHub Desktop/CLI/Copilot, Warp, VS Build Tools'; On=$true; WingetGroup='Dev Tools' }
+    [pscustomobject]@{ Id= 2; Name='Programming Languages';   Desc='Python 3.14, Node.js LTS + NVM, .NET SDK 10, Java JDK 17+21, Go, Rust, C/C++ (LLVM, MinGW, CMake, Ninja)'; On=$true; WingetGroup='Languages,Other' }
+    [pscustomobject]@{ Id= 3; Name='Web Browsers';            Desc='Google Chrome, Mozilla Firefox'; On=$true; WingetGroup='Browsers' }
+    [pscustomobject]@{ Id= 4; Name='Cloud & CLI Tools';       Desc='Azure CLI, PowerShell 7, Redis, WSL + Ubuntu 24.04'; On=$true; WingetGroup='CLI / Infra' }
+    [pscustomobject]@{ Id= 5; Name='Office & Productivity';   Desc='Teams, Office 365, OneDrive, Google Drive, Adobe Acrobat Reader'; On=$true; WingetGroup='Productivity' }
+    [pscustomobject]@{ Id= 6; Name='Media & Utilities';       Desc='VLC, Unity Hub, Samsung SmartSwitch, YubiKey Manager, Remote Help'; On=$true; WingetGroup='Media / Misc' }
+    [pscustomobject]@{ Id= 7; Name='Runtimes & Libraries';    Desc='.NET Desktop/AspNet runtimes, .NET Framework DevPack 4, VCRedist 2015+, ODBC/SQL types'; On=$true; WingetGroup='Runtimes' }
+    [pscustomobject]@{ Id= 8; Name='Shell: Git Bash + Zsh';   Desc='Zsh on Git Bash, Oh My Zsh, Powerlevel10k theme, MesloLGS Nerd Font, Windows Terminal default'; On=$true; WingetGroup='' }
+    [pscustomobject]@{ Id= 9; Name='Shell: Oh My Posh';       Desc='Beautiful prompt for PowerShell & CMD (Nerd Font icons, git status, etc.)'; On=$true; WingetGroup='' }
+    [pscustomobject]@{ Id=10; Name='Windows Features';        Desc='WSL2, Hyper-V, Containers, Windows Sandbox, .NET 3.5, Hypervisor Platform'; On=$true; WingetGroup='' }
+    [pscustomobject]@{ Id=11; Name='VS Code Extensions';      Desc='Restore all extensions from vscode-extensions.txt (ESLint, GitLens, themes, etc.)'; On=$true; WingetGroup='' }
+    [pscustomobject]@{ Id=12; Name='Language Tooling';        Desc='npm globals (React/TS/ESLint), Python pipx tools (uv/ruff/poetry), Rust components, Go workspace, Maven, Gradle'; On=$true; WingetGroup='' }
+    [pscustomobject]@{ Id=13; Name='Git Config & SSH Key';    Desc='Set git identity + defaults, generate ed25519 SSH key for GitHub'; On=$true; WingetGroup='' }
+)
+
+function Show-SetupMenu {
+    param([pscustomobject[]]$cats)
+
+    $done = $false
+    while (-not $done) {
+        Clear-Host
+        Write-Host ""
+        Write-Host "  =============================================" -ForegroundColor Cyan
+        Write-Host "    Windows Dev Machine Setup - Configuration" -ForegroundColor Cyan
+        Write-Host "  =============================================" -ForegroundColor Cyan
+        Write-Host ""
+        Write-Host "  Select what to install. Enter a number to toggle on/off." -ForegroundColor DarkGray
+        Write-Host ""
+
+        foreach ($c in $cats) {
+            $check = $(if ($c.On) { 'x' } else { ' ' })
+            $color = $(if ($c.On) { 'Green' } else { 'DarkGray' })
+            $num   = "{0,2}" -f $c.Id
+            Write-Host ("  [{0}] {1}. " -f $check, $num) -NoNewline -ForegroundColor $color
+            Write-Host ("{0,-28}" -f $c.Name) -NoNewline -ForegroundColor White
+            Write-Host (" {0}" -f $c.Desc) -ForegroundColor DarkGray
+        }
+
+        Write-Host ""
+        Write-Host "  Commands:  " -NoNewline -ForegroundColor DarkGray
+        Write-Host "a" -NoNewline -ForegroundColor Yellow
+        Write-Host " = select all   " -NoNewline -ForegroundColor DarkGray
+        Write-Host "n" -NoNewline -ForegroundColor Yellow
+        Write-Host " = select none   " -NoNewline -ForegroundColor DarkGray
+        Write-Host "go" -NoNewline -ForegroundColor Green
+        Write-Host " = start install   " -NoNewline -ForegroundColor DarkGray
+        Write-Host "q" -NoNewline -ForegroundColor Red
+        Write-Host " = quit" -ForegroundColor DarkGray
+        Write-Host ""
+        $userChoice = Read-Host "  >"
+
+        switch ($userChoice.Trim().ToLower()) {
+            'go'  { $done = $true }
+            'a'   { $cats | ForEach-Object { $_.On = $true } }
+            'n'   { $cats | ForEach-Object { $_.On = $false } }
+            'q'   { Write-Host "Cancelled."; exit 0 }
+            default {
+                $num = 0
+                if ([int]::TryParse($userChoice.Trim(), [ref]$num)) {
+                    $match = $cats | Where-Object { $_.Id -eq $num }
+                    if ($match) { $match.On = -not $match.On }
+                }
+            }
+        }
+    }
+}
+
+# --- Default terminal/shell chooser ---
+$defaultShellOptions = @(
+    [pscustomobject]@{ Key='1'; Name='Git Bash + Zsh';  Desc='(recommended) Git Bash with zsh + Powerlevel10k as default, elevated' }
+    [pscustomobject]@{ Key='2'; Name='PowerShell 7';     Desc='pwsh.exe as default profile' }
+    [pscustomobject]@{ Key='3'; Name='PowerShell 5';     Desc='Windows PowerShell (built-in, legacy)' }
+    [pscustomobject]@{ Key='4'; Name='Command Prompt';   Desc='CMD with Clink + Oh My Posh' }
+    [pscustomobject]@{ Key='5'; Name='Keep current';     Desc='Don''t change the Windows Terminal default' }
+)
+
+function Show-DefaultShellMenu {
+    Write-Host ""
+    Write-Host "  =============================================" -ForegroundColor Cyan
+    Write-Host "    Choose your default terminal profile" -ForegroundColor Cyan
+    Write-Host "  =============================================" -ForegroundColor Cyan
+    Write-Host ""
+    Write-Host "  This sets which shell opens when you launch Windows Terminal." -ForegroundColor DarkGray
+    Write-Host ""
+    foreach ($o in $defaultShellOptions) {
+        $color = $(if ($o.Key -eq '1') { 'Green' } else { 'White' })
+        Write-Host ("    {0}. " -f $o.Key) -NoNewline -ForegroundColor Yellow
+        Write-Host ("{0,-20}" -f $o.Name) -NoNewline -ForegroundColor $color
+        Write-Host (" {0}" -f $o.Desc) -ForegroundColor DarkGray
+    }
+    Write-Host ""
+    $choice = Read-Host "  Choose [1-5, default=1]"
+    if ([string]::IsNullOrWhiteSpace($choice)) { $choice = '1' }
+    return $choice.Trim()
+}
+
+if (-not $Unattended) {
+    Show-SetupMenu -cats $allCategories
+    $shellChoice = Show-DefaultShellMenu
+}
+else {
+    $shellChoice = '1'  # default to Git Bash + Zsh in unattended mode
+}
+
+# Pass the shell choice to bootstrap-dev.sh
+$env:SETUP_DEFAULT_SHELL = $shellChoice
+
+# Build the selected set for downstream scripts.
+$selectedIds = ($allCategories | Where-Object { $_.On } | ForEach-Object { $_.Id }) -join ','
+$env:SETUP_CATEGORIES = $selectedIds
+
+# Map selected winget groups for restore.ps1.
+$selectedWingetGroups = ($allCategories | Where-Object { $_.On -and $_.WingetGroup } |
+    ForEach-Object { $_.WingetGroup }) -join ','
+$env:SETUP_WINGET_GROUPS = $selectedWingetGroups
+
+# Determine phase skips from selections.
+$hasWingetCategories = ($allCategories | Where-Object { $_.On -and $_.WingetGroup }).Count -gt 0
+if (-not $hasWingetCategories) { $SkipPhase1 = $true }
+
+$catIds = $allCategories | Where-Object { $_.On } | ForEach-Object { $_.Id }
+$hasPhase2 = ($catIds | Where-Object { $_ -in @(8,9,11,12,13) }).Count -gt 0
+if (-not $hasPhase2) { $SkipPhase2 = $true }
+
+Write-Host ""
+Write-Host ("Selected: {0} of {1} categories" -f @($catIds).Count, $allCategories.Count) -ForegroundColor Cyan
+Write-Host ""
+
 # --- Phase 1: winget packages ----------------------------
 if (-not $SkipPhase1) {
     $restore = Join-Path $ScriptDir 'restore.ps1'
@@ -116,7 +252,7 @@ else {
 }
 
 # --- Phase 1b: Windows Optional Features -----------------
-if (-not $SkipPhase1) {
+if ($catIds -contains 10) {
     $featuresScript = Join-Path $ScriptDir 'Enable-WindowsFeatures.ps1'
     if (Test-Path $featuresScript) {
         Write-Host ""

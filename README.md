@@ -10,9 +10,9 @@ Download. Double-click. Pick what you want. Done.
 
 **[Download System-Setup.zip](https://github.com/sdeepanshu13/System-Setup/releases/latest/download/System-Setup.zip)**
 
-Extract it. Double-click `Setup.exe` inside. That's it.
+Extract it. Double-click **`Setup.cmd`** inside. That's it.
 
-> Why a .zip? Extracting removes the "downloaded from internet" flag, so Windows Defender and SmartScreen don't interfere.
+No exe warnings. No SmartScreen. No Defender blocks.
 
 ---
 
@@ -20,7 +20,7 @@ Extract it. Double-click `Setup.exe` inside. That's it.
 
 1. **Download** `System-Setup.zip` from the link above
 2. **Extract** the zip (right-click > Extract All)
-3. **Double-click** `Setup.exe` inside the extracted folder
+3. **Double-click** `Setup.cmd` inside the extracted folder
 4. **Check/uncheck** what you want in the GUI
 5. **Pick** your default terminal
 6. **Click Install**
@@ -100,7 +100,7 @@ Each is a separate checkbox:
 
 | Problem | Solution |
 |---------|----------|
-| SmartScreen warning | Click **More info** then **Run anyway** (the exe is unsigned) |
+| SmartScreen warning | This shouldn't happen with the .zip distribution. If it does, right-click > Properties > Unblock on the zip before extracting. |
 | Weird characters in terminal | Set your terminal font to **MesloLGS NF** |
 | A package failed to install | Re-run Setup.exe. Already-installed packages are skipped automatically. |
 | WSL not working | Reboot first. It needs a restart. |

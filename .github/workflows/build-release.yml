@@ -15,50 +15,49 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Install ps2exe
+      - name: Package release zip
         shell: pwsh
         run: |
-          Install-Module ps2exe -Scope CurrentUser -Force -Repository PSGallery
-
-      - name: Build Setup.exe
-        shell: pwsh
-        run: |
-          cd Windows
-          .\Build-Exe.ps1
-
-      - name: Package as ZIP (avoids SmartScreen warnings)
-        shell: pwsh
-        run: |
-          # Create a clean release zip with Setup.exe + a readme inside
-          $zipDir = 'dist\System-Setup'
+          $distDir = 'dist'
+          $zipDir  = "$distDir\System-Setup"
+          if (Test-Path $distDir) { Remove-Item $distDir -Recurse -Force }
           New-Item -ItemType Directory -Path $zipDir -Force | Out-Null
-          Copy-Item 'dist\Setup.exe' $zipDir
-          # Add a tiny instructions file inside the zip
+
+          # Copy only the files users need (no .git, no build scripts, no dev docs)
+          $files = @(
+            'Windows\Setup.cmd',
+            'Windows\Setup.ps1',
+            'Windows\Setup-UI.ps1',
+            'Windows\restore.ps1',
+            'Windows\Enable-WindowsFeatures.ps1',
+            'Windows\bootstrap-dev.sh',
+            'Windows\winget-packages.json',
+            'Windows\vscode-extensions.txt',
+            'Windows\zshrc-template',
+            'Windows\p10k-template',
+            'Windows\zsh-gitbash.tar.gz'
+          )
+          foreach ($f in $files) {
+            Copy-Item $f $zipDir
+          }
+
+          # Add a simple readme inside the zip
           @"
-          System-Setup - Windows Dev Machine Installer
-          =============================================
+          System-Setup
+          =============
+          Double-click Setup.cmd to start.
+          A GUI will open where you pick what to install.
 
-          1. Extract this folder
-          2. Double-click Setup.exe
-          3. Pick what you want in the GUI
-          4. Click Install
-
-          More info: https://github.com/${{ github.repository }}
+          https://github.com/${{ github.repository }}
           "@ | Set-Content "$zipDir\README.txt"
-          Compress-Archive -Path $zipDir -DestinationPath 'dist\System-Setup.zip' -Force
 
-      - name: Generate checksums
-        id: checksum
-        shell: pwsh
-        run: |
-          $exeHash = (Get-FileHash 'dist\Setup.exe' -Algorithm SHA256).Hash
-          $zipHash = (Get-FileHash 'dist\System-Setup.zip' -Algorithm SHA256).Hash
-          $exeSize = '{0:N1} MB' -f ((Get-Item 'dist\Setup.exe').Length / 1MB)
-          $zipSize = '{0:N1} MB' -f ((Get-Item 'dist\System-Setup.zip').Length / 1MB)
-          "exe_hash=$exeHash" >> $env:GITHUB_OUTPUT
-          "zip_hash=$zipHash" >> $env:GITHUB_OUTPUT
-          "exe_size=$exeSize" >> $env:GITHUB_OUTPUT
-          "zip_size=$zipSize" >> $env:GITHUB_OUTPUT
+          Compress-Archive -Path $zipDir -DestinationPath "$distDir\System-Setup.zip" -Force
+
+          $hash = (Get-FileHash "$distDir\System-Setup.zip" -Algorithm SHA256).Hash
+          $size = '{0:N1} MB' -f ((Get-Item "$distDir\System-Setup.zip").Length / 1MB)
+          "zip_hash=$hash" >> $env:GITHUB_OUTPUT
+          "zip_size=$size" >> $env:GITHUB_OUTPUT
+        id: package
 
       - name: Get version tag
         id: version
@@ -78,24 +77,16 @@ jobs:
           body: |
             ## Download
 
-            **Recommended: Download `System-Setup.zip`**, extract it, and double-click `Setup.exe` inside.
+            **Download `System-Setup.zip`**, extract it, and **double-click `Setup.cmd`** inside.
 
-            > Using the .zip avoids Windows SmartScreen warnings since extracted files are not flagged.
+            No exe, no SmartScreen warnings, no Defender blocks.
 
             | File | Size | SHA-256 |
             |------|------|---------|
-            | `System-Setup.zip` | ${{ steps.checksum.outputs.zip_size }} | `${{ steps.checksum.outputs.zip_hash }}` |
-            | `Setup.exe` (standalone) | ${{ steps.checksum.outputs.exe_size }} | `${{ steps.checksum.outputs.exe_hash }}` |
-
-            **Verify integrity** (optional):
-            ```powershell
-            (Get-FileHash .\System-Setup.zip).Hash -eq '${{ steps.checksum.outputs.zip_hash }}'
-            ```
+            | `System-Setup.zip` | ${{ steps.package.outputs.zip_size }} | `${{ steps.package.outputs.zip_hash }}` |
 
             Built from [`${{ github.sha }}`](https://github.com/${{ github.repository }}/commit/${{ github.sha }})
-          files: |
-            dist/System-Setup.zip
-            dist/Setup.exe
+          files: dist/System-Setup.zip
           make_latest: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

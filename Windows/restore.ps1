@@ -339,26 +339,6 @@ if ($Sequential) {
         --disable-interactivity
 }
 else {
-    # Prefer ThreadJob (lightweight). Fall back to Start-Job if unavailable.
-    # Suppress the noisy "module not found" error if ThreadJob isn't there --
-    # we handle it gracefully.
-    $useThreadJob = $false
-    if (Get-Command Start-ThreadJob -ErrorAction SilentlyContinue) {
-        $useThreadJob = $true
-    }
-    else {
-        $prevEAP = $ErrorActionPreference
-        $ErrorActionPreference = 'SilentlyContinue'
-        try {
-            Import-Module ThreadJob -ErrorAction SilentlyContinue 2>$null
-            if (Get-Command Start-ThreadJob -ErrorAction SilentlyContinue) {
-                $useThreadJob = $true
-            }
-        }
-        catch { $useThreadJob = $false }
-        finally { $ErrorActionPreference = $prevEAP }
-    }
-
     $logDir = Join-Path $RunLogDir 'packages'
     New-Item -ItemType Directory -Path $logDir -Force | Out-Null
     Write-Host "Per-package logs: $logDir" -ForegroundColor DarkGray
@@ -409,94 +389,63 @@ else {
         Write-Host ""
     }
 
-    Write-Host "Phase B: Installing remaining packages in parallel (throttle: $Throttle)..." -ForegroundColor Cyan
+    Write-Host "Phase B: Installing remaining packages (throttle: $Throttle)..." -ForegroundColor Cyan
     Write-Host ""
 
-    $scriptBlock = {
-        param($pkg, $commonArgs, $logDir)
-        $log = Join-Path $logDir ("{0}.log" -f ($pkg -replace '[^A-Za-z0-9._-]', '_'))
-        $wgArgs = @('install', '--id', $pkg, '--exact') + $commonArgs
-        try {
-            $output = & winget @wgArgs 2>&1
-            $output | Out-File -FilePath $log -Encoding UTF8
-            [pscustomobject]@{
-                Package  = $pkg
-                ExitCode = $LASTEXITCODE
-                Log      = $log
-            }
-        }
-        catch {
-            "EXCEPTION: $_" | Out-File -FilePath $log -Encoding UTF8
-            [pscustomobject]@{
-                Package  = $pkg
-                ExitCode = -1
-                Log      = $log
-            }
-        }
-    }
+    # Per-package timeout (5 minutes). Any installer that takes longer is killed.
+    $pkgTimeoutSec = 300
 
-    $jobs = @()
     $completed = 0
     $total = $remainingPackages.Count
+    $succeeded = 0
+    $failed = [System.Collections.Generic.List[string]]::new()
 
     foreach ($pkg in $remainingPackages) {
-        # Throttle: wait until a slot opens
-        while (@($jobs | Where-Object { $_.State -eq 'Running' }).Count -ge $Throttle) {
-            $done = Wait-Job -Job $jobs -Any -Timeout 5
-            if ($done) {
-                foreach ($j in @($done)) {
-                    $r = Receive-Job -Job $j
-                    $completed++
-                    $status = if ($r.ExitCode -eq 0) { 'OK    ' } else { "FAIL($($r.ExitCode))" }
-                    $color  = if ($r.ExitCode -eq 0) { 'Green' } else { 'Yellow' }
-                    Write-Host ("  [{0,3}/{1}] {2} {3}" -f $completed, $total, $status, $r.Package) -ForegroundColor $color
-                    Remove-Job -Job $j | Out-Null
-                }
-                # @(...) is critical: when the filter returns one job (or zero),
-                # the result collapses to a scalar and `$jobs += newJob` then calls
-                # op_Addition on PSRemotingJob -- which doesn't exist and throws.
-                $jobs = @($jobs | Where-Object { $_.State -eq 'Running' })
-            }
-        }
+        $completed++
+        $log = Join-Path $logDir ("{0}.log" -f ($pkg -replace '[^A-Za-z0-9._-]', '_'))
+        Write-Host ("  [{0,3}/{1}] installing: {2}" -f $completed, $total, $pkg) -ForegroundColor DarkGray -NoNewline
 
-        Write-Host ("  -> queued: $pkg") -ForegroundColor DarkGray
-        if ($useThreadJob) {
-            $jobs = @($jobs) + (Start-ThreadJob -ScriptBlock $scriptBlock -ArgumentList $pkg, $commonArgs, $logDir)
+        $wgArgs = @('install', '--id', $pkg, '--exact') + $commonArgs
+
+        # Run winget as a process with a hard timeout so hung installers can't block forever.
+        $psi = New-Object System.Diagnostics.ProcessStartInfo
+        $psi.FileName = 'winget'
+        $psi.Arguments = ($wgArgs -join ' ')
+        $psi.UseShellExecute = $false
+        $psi.RedirectStandardOutput = $true
+        $psi.RedirectStandardError = $true
+        $psi.CreateNoWindow = $true
+
+        $proc = [System.Diagnostics.Process]::Start($psi)
+        $stdout = $proc.StandardOutput.ReadToEndAsync()
+        $stderr = $proc.StandardError.ReadToEndAsync()
+
+        if ($proc.WaitForExit($pkgTimeoutSec * 1000)) {
+            $code = $proc.ExitCode
+            $output = $stdout.Result + "`n" + $stderr.Result
         }
         else {
-            $jobs = @($jobs) + (Start-Job -ScriptBlock $scriptBlock -ArgumentList $pkg, $commonArgs, $logDir)
+            # Timed out -- kill the process
+            try { $proc.Kill() } catch { }
+            $code = -1
+            $output = "TIMEOUT after $pkgTimeoutSec seconds"
+        }
+        $proc.Dispose()
+
+        $output | Out-File -FilePath $log -Encoding UTF8
+
+        if ($code -eq 0) {
+            Write-Host " OK" -ForegroundColor Green
+            $succeeded++
+        }
+        else {
+            Write-Host " FAIL($code)" -ForegroundColor Yellow
+            $failed.Add($pkg)
         }
     }
 
-    # Drain remaining (10 min timeout per batch to prevent infinite hangs)
-    $drainStart = Get-Date
-    while (@($jobs).Count -gt 0) {
-        $done = Wait-Job -Job $jobs -Any -Timeout 10
-        if (-not $done) {
-            # Check if we've been draining for too long (10 min total)
-            if (((Get-Date) - $drainStart).TotalMinutes -gt 10) {
-                Write-Warning "Some package installs appear stuck. Stopping remaining jobs..."
-                $jobs | Stop-Job -ErrorAction SilentlyContinue
-                $jobs | ForEach-Object {
-                    $completed++
-                    Write-Host ("  [{0,3}/{1}] TIMEOUT {2}" -f $completed, $total, $_.Name) -ForegroundColor Red
-                    Remove-Job -Job $_ -Force -ErrorAction SilentlyContinue
-                }
-                $jobs = @()
-                break
-            }
-            continue
-        }
-        foreach ($j in @($done)) {
-            $r = Receive-Job -Job $j
-            $completed++
-            $status = if ($r.ExitCode -eq 0) { 'OK    ' } else { "FAIL($($r.ExitCode))" }
-            $color  = if ($r.ExitCode -eq 0) { 'Green' } else { 'Yellow' }
-            Write-Host ("  [{0,3}/{1}] {2} {3}" -f $completed, $total, $status, $r.Package) -ForegroundColor $color
-            Remove-Job -Job $j | Out-Null
-        }
-        $jobs = @($jobs | Where-Object { $_.State -eq 'Running' })
-    }
+    Write-Host ""
+    Write-Host ("Phase B complete: {0} succeeded, {1} failed out of {2}" -f $succeeded, $failed.Count, $total) -ForegroundColor Cyan
 }
 
 Write-Host ""

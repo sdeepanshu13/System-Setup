@@ -407,32 +407,22 @@ else {
 
         $wgArgs = @('install', '--id', $pkg, '--exact') + $commonArgs
 
-        # Run winget as a process with a hard timeout so hung installers can't block forever.
-        $psi = New-Object System.Diagnostics.ProcessStartInfo
-        $psi.FileName = 'winget'
-        $psi.Arguments = ($wgArgs -join ' ')
-        $psi.UseShellExecute = $false
-        $psi.RedirectStandardOutput = $true
-        $psi.RedirectStandardError = $true
-        $psi.CreateNoWindow = $true
+        # Run winget directly. No stdout capture (causes deadlocks).
+        # Redirect output to log file via cmd /c piping.
+        $wgArgStr = ($wgArgs | ForEach-Object { if ($_ -match ' ') { "`"$_`"" } else { $_ } }) -join ' '
+        $cmdLine = "winget $wgArgStr > `"$log`" 2>&1"
 
-        $proc = [System.Diagnostics.Process]::Start($psi)
-        $stdout = $proc.StandardOutput.ReadToEndAsync()
-        $stderr = $proc.StandardError.ReadToEndAsync()
+        $proc = Start-Process -FilePath 'cmd.exe' -ArgumentList "/c $cmdLine" `
+            -WindowStyle Hidden -PassThru
 
         if ($proc.WaitForExit($pkgTimeoutSec * 1000)) {
             $code = $proc.ExitCode
-            $output = $stdout.Result + "`n" + $stderr.Result
         }
         else {
-            # Timed out -- kill the process
             try { $proc.Kill() } catch { }
+            "TIMEOUT after $pkgTimeoutSec seconds" | Out-File -FilePath $log -Append
             $code = -1
-            $output = "TIMEOUT after $pkgTimeoutSec seconds"
         }
-        $proc.Dispose()
-
-        $output | Out-File -FilePath $log -Encoding UTF8
 
         if ($code -eq 0) {
             Write-Host " OK" -ForegroundColor Green

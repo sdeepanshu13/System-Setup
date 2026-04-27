@@ -36,29 +36,12 @@ param(
 $ErrorActionPreference = 'Continue'
 $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Definition
 
-# --- Auto-elevate ----------------------------------------
+# --- Check elevation (CMD handles the actual elevation) ----
 $isAdmin = ([Security.Principal.WindowsPrincipal] [Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole(
     [Security.Principal.WindowsBuiltInRole]::Administrator)
 if (-not $isAdmin) {
-    Write-Host "Not running as Administrator -- relaunching elevated..." -ForegroundColor Yellow
-    $argList = @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', "`"$($MyInvocation.MyCommand.Definition)`"")
-    foreach ($kv in $PSBoundParameters.GetEnumerator()) {
-        if ($kv.Value -is [switch]) {
-            if ($kv.Value.IsPresent) { $argList += "-$($kv.Key)" }
-        }
-        else {
-            $argList += "-$($kv.Key)"
-            $argList += "`"$($kv.Value)`""
-        }
-    }
-    try {
-        Start-Process -FilePath 'powershell.exe' -ArgumentList $argList -Verb RunAs -Wait
-        exit 0
-    }
-    catch {
-        Write-Error "Failed to elevate: $_"
-        exit 1
-    }
+    Write-Warning "Not running as Administrator. Some installs may fail."
+    Write-Warning "Run Setup.cmd instead -- it handles elevation automatically."
 }
 
 Write-Host ""

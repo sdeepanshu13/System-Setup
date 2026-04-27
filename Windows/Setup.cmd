@@ -1,6 +1,7 @@
 @echo off
 REM ============================================================
 REM  System-Setup -- double-click this file to start.
+REM  Handles elevation itself so only ONE window exists.
 REM ============================================================
 setlocal
 
@@ -17,15 +18,29 @@ if exist "%SCRIPT_DIR%.setup\Setup.ps1" (
     exit /b 1
 )
 
+REM Check if we're already admin
+net session >nul 2>&1
+if %ERRORLEVEL% neq 0 (
+    echo Requesting Administrator access...
+    powershell.exe -NoProfile -Command "Start-Process -FilePath 'cmd.exe' -ArgumentList '/c \"\"%~f0\" %*\"' -Verb RunAs -Wait"
+    exit /b %ERRORLEVEL%
+)
+
 echo.
 echo  =============================================
 echo   System-Setup - Windows Dev Machine Setup
 echo  =============================================
 echo.
-echo  Setup is running in the Administrator window.
-echo  This window will close when setup finishes.
-echo  DO NOT close this window.
-echo.
 
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File "%SETUP_PS1%" %*
+
+echo.
+if %ERRORLEVEL% neq 0 (
+    echo Setup finished with errors. Check the log file above.
+) else (
+    echo Setup complete!
+)
+echo.
+pause
+exit /b %ERRORLEVEL%
 exit /b %ERRORLEVEL%

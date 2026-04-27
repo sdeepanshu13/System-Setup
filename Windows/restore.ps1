@@ -468,9 +468,25 @@ else {
         }
     }
 
-    # Drain remaining
+    # Drain remaining (10 min timeout per batch to prevent infinite hangs)
+    $drainStart = Get-Date
     while (@($jobs).Count -gt 0) {
-        $done = Wait-Job -Job $jobs -Any
+        $done = Wait-Job -Job $jobs -Any -Timeout 10
+        if (-not $done) {
+            # Check if we've been draining for too long (10 min total)
+            if (((Get-Date) - $drainStart).TotalMinutes -gt 10) {
+                Write-Warning "Some package installs appear stuck. Stopping remaining jobs..."
+                $jobs | Stop-Job -ErrorAction SilentlyContinue
+                $jobs | ForEach-Object {
+                    $completed++
+                    Write-Host ("  [{0,3}/{1}] TIMEOUT {2}" -f $completed, $total, $_.Name) -ForegroundColor Red
+                    Remove-Job -Job $_ -Force -ErrorAction SilentlyContinue
+                }
+                $jobs = @()
+                break
+            }
+            continue
+        }
         foreach ($j in @($done)) {
             $r = Receive-Job -Job $j
             $completed++

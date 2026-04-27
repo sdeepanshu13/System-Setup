@@ -1,7 +1,6 @@
 @echo off
 REM ============================================================
-REM  System-Setup launcher -- double-click this file to start.
-REM  Everything else is in the .setup folder (hidden).
+REM  System-Setup -- double-click this file to start.
 REM ============================================================
 setlocal
 
@@ -18,12 +17,15 @@ if exist "%SCRIPT_DIR%.setup\Setup.ps1" (
     exit /b 1
 )
 
-echo Starting System-Setup...
-echo Script: %SETUP_PS1%
+echo.
+echo  =============================================
+echo   System-Setup - Windows Dev Machine Setup
+echo  =============================================
+echo.
+echo  Setup is running in the Administrator window.
+echo  This window will close when setup finishes.
+echo  DO NOT close this window.
+echo.
+
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File "%SETUP_PS1%" %*
-if %ERRORLEVEL% neq 0 (
-    echo.
-    echo Setup exited with error code %ERRORLEVEL%
-    pause
-)
 exit /b %ERRORLEVEL%

@@ -14,6 +14,8 @@ User double-clicks Setup.exe (or Setup.cmd)
   |
   +--> Setup-UI.ps1 (GUI)
   |      |
+  |      +--> Profile login: email/mobile + passphrase + OTP verify (optional)
+  |      +--> Loads saved selections (encrypted) if that profile exists
   |      +--> Returns: selected winget package IDs
   |      +--> Returns: selected feature flags
   |      +--> Returns: default terminal choice (1-5)
@@ -67,6 +69,53 @@ Windows Forms app, dark theme. Every item is its own checkbox.
 
 **Section: DEFAULT TERMINAL** -- radio buttons: Git Bash+Zsh / PS7 / PS5 / CMD / Keep current
 
+The bottom bar has **Select All** / **Deselect All** buttons that toggle every
+package and feature checkbox at once.
+
+---
+
+## User Profiles (encrypted, git-synced)
+
+The first screen (`Show-ProfileLoginDialog` in `Setup-UI.ps1`) lets a user save
+their selections and restore them on any machine. Logic lives in
+`UserProfile.ps1` (storage + crypto) and `Otp.ps1` (verification).
+
+**Identity & lookup**
+- Primary key = the user's email or mobile, normalised (email lowercased, mobile
+  reduced to digits).
+- File name = `SHA-256(normalised key)` (first 32 hex chars) -- the raw
+  email/phone is never written to disk: `Windows\users\<hash>.json`.
+
+**Encryption (only the user can read it)**
+- Payload (name, packages, features, default shell) -> JSON -> **AES-256-CBC**.
+- Key derived from the user's **passphrase** via **PBKDF2-SHA256** (200k
+  iterations, random 16-byte salt).
+- Integrity via **HMAC-SHA256** over IV+ciphertext (encrypt-then-MAC). A wrong
+  passphrase or any tampering fails the MAC -> `Decrypted = $false`.
+- The passphrase is never stored, logged, or committed.
+
+**OTP verification (proves ownership of the email/mobile)**
+- On "Continue" a 6-digit code (crypto RNG) is generated and sent; only its
+  salted hash + expiry (5 min) + attempt cap (5) are kept in memory.
+- Delivery reads credentials ONLY from env vars or a git-ignored
+  `Windows\users\.otp-config.json` -- never hard-coded:
+
+  | Channel | Variables |
+  |---------|-----------|
+  | Email (SMTP) | `SETUP_OTP_SMTP_HOST` `SETUP_OTP_SMTP_PORT` `SETUP_OTP_SMTP_USER` `SETUP_OTP_SMTP_PASS` `SETUP_OTP_SMTP_FROM` `SETUP_OTP_SMTP_SSL` |
+  | SMS (Twilio) | `SETUP_OTP_TWILIO_SID` `SETUP_OTP_TWILIO_TOKEN` `SETUP_OTP_TWILIO_FROM` |
+  | SMS (generic HTTP POST) | `SETUP_OTP_SMS_API_URL` `SETUP_OTP_SMS_API_KEY` `SETUP_OTP_SMS_FROM` |
+  | Local test | `SETUP_OTP_DEV=1` -> prints the code to console + git-ignored `.otp-dev.txt` |
+
+- If no channel is configured, the user can still click **Skip** and use defaults.
+
+**Sync**
+- `Publish-ProfileStore` git-adds ONLY the single `users\<hash>.json`, commits,
+  and pushes (best-effort, never fatal). Logs / SSH keys are never staged.
+- `Sync-ProfileStore` runs a best-effort `git pull --ff-only` before lookup so a
+  returning user on a freshly-cloned machine sees their latest data.
+- Requires push access -- fork/clone the repo to sync your own profiles.
+
 ---
 
 ## Environment Variables (internal)
@@ -81,6 +130,9 @@ Windows Forms app, dark theme. Every item is its own checkbox.
 | `SETUP_SKIP_PHASE1` | Setup.ps1 | bootstrap-dev.sh | `1` |
 | `SETUP_GIT_NAME` | Setup.ps1 | bootstrap-dev.sh | `Jane Doe` |
 | `SETUP_GIT_EMAIL` | Setup.ps1 | bootstrap-dev.sh | `jane@example.com` |
+| `SETUP_PROFILE_PATH` | Setup-UI.ps1 | Setup.ps1 | `...\Windows\users\ab12..json` |
+| `SETUP_USER_NAME` | Setup-UI.ps1 | Setup.ps1 | `Jane Doe` |
+| `SETUP_USER_EMAIL` | Setup-UI.ps1 | Setup.ps1 | `jane@example.com` |
 
 ---
 

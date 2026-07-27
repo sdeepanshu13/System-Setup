@@ -21,12 +21,35 @@ No exe warnings. No SmartScreen. No Defender blocks.
 1. **Download** `System-Setup.zip` from the link above
 2. **Extract** the zip (right-click > Extract All)
 3. **Double-click** `Setup.cmd` inside the extracted folder
-4. **Check/uncheck** what you want in the GUI
+4. **Check/uncheck** what you want in the GUI (or use **Select All** / **Deselect All**)
 5. **Pick** your default terminal
 6. **Click Install**
 7. **Reboot** once when it finishes
 
 That's it. Your machine is ready.
+
+---
+
+## Sync your preferences across machines (optional)
+
+The first screen lets you save your exact selections and reuse them anywhere:
+
+1. Enter your **email or mobile number** and a **passphrase** you'll remember.
+2. We send a **one-time verification code** to that email/mobile to confirm it's you.
+3. Pick your apps and click **Install** -- your choices are saved.
+
+Next time -- even on a brand-new PC -- enter the same email/mobile + passphrase
+and your previous selections come back automatically.
+
+**Your data stays private.** It's stored **encrypted** (AES-256; only your
+passphrase can unlock it), and the file is named after a one-way hash of your
+email/mobile -- so even though it lives in this repo, nobody else can read it or
+tell whose it is. Forgot your passphrase or don't want this? Just click **Skip**
+and use the defaults.
+
+> Verification codes are only sent if an email (SMTP) or SMS provider has been
+> configured -- see [Windows/README.md](Windows/README.md#user-profiles-encrypted-git-synced).
+> Preferences sync over git, so you need push access (your own fork or clone).
 
 ---
 
@@ -105,6 +128,8 @@ Each is a separate checkbox:
 | A package failed to install | Re-run Setup.exe. Already-installed packages are skipped automatically. |
 | WSL not working | Reboot first. It needs a restart. |
 | Need to change what's installed | Run Setup.exe again. Uncheck what you don't want. |
+| Forgot my passphrase | There's no recovery -- the passphrase *is* the encryption key. Click **Skip**, or start fresh with a new passphrase. |
+| "Couldn't send code" | Email/SMS delivery isn't configured. Click **Skip** to continue, or see [Windows/README.md](Windows/README.md#user-profiles-encrypted-git-synced). |
 
 ---
 

@@ -36,6 +36,10 @@ param(
 $ErrorActionPreference = 'Continue'
 $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Definition
 
+# Load the encrypted user-profile helpers (used to publish saved selections).
+$profileHelper = Join-Path $ScriptDir 'UserProfile.ps1'
+if (Test-Path $profileHelper) { . $profileHelper }
+
 # --- Check elevation (CMD handles the actual elevation) ----
 $isAdmin = ([Security.Principal.WindowsPrincipal] [Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole(
     [Security.Principal.WindowsBuiltInRole]::Administrator)
@@ -279,6 +283,10 @@ if (-not $SkipPhase2) {
     Write-Host ""
     Write-Host "Phase 2: zsh / dotfiles / SSH setup (via Git Bash)..." -ForegroundColor Cyan
 
+    # Prefer the identity captured during profile login -- avoids re-prompting.
+    if (-not $GitName  -and $env:SETUP_USER_NAME)  { $GitName  = $env:SETUP_USER_NAME }
+    if (-not $GitEmail -and $env:SETUP_USER_EMAIL) { $GitEmail = $env:SETUP_USER_EMAIL }
+
     # Try to read existing git identity so we don't re-prompt on every run.
     $existingGitExe = $null
     foreach ($p in @("$env:ProgramFiles\Git\cmd\git.exe",
@@ -464,6 +472,24 @@ if (Test-Path $pubKeyPath) {
 Write-Host "Log file: $SetupLog" -ForegroundColor DarkGray
 Write-Host "  Per-package logs: $RunLogDir\packages\" -ForegroundColor DarkGray
 Write-Host ""
+
+# --- Publish the user's encrypted profile to git (best-effort) ---
+if ($env:SETUP_PROFILE_PATH -and (Get-Command Publish-ProfileStore -ErrorAction SilentlyContinue)) {
+    Write-Host "Saving your preferences to git (encrypted)..." -ForegroundColor Cyan
+    $pub = Publish-ProfileStore -ProfilePath $env:SETUP_PROFILE_PATH
+    if ($pub.Ok -and $pub.Reason -eq 'pushed') {
+        Write-Host "  Preferences synced to git." -ForegroundColor DarkGray
+    }
+    elseif ($pub.Ok) {
+        Write-Host "  Preferences already up to date." -ForegroundColor DarkGray
+    }
+    else {
+        Write-Host "  Couldn't push preferences ($($pub.Reason)). Saved locally at:" -ForegroundColor Yellow
+        Write-Host "    $env:SETUP_PROFILE_PATH" -ForegroundColor DarkGray
+        Write-Host "  (Need push access -- fork the repo or run 'git push' yourself.)" -ForegroundColor DarkGray
+    }
+    Remove-Item Env:SETUP_PROFILE_PATH -ErrorAction SilentlyContinue
+}
 
 try { Stop-Transcript | Out-Null } catch { }
 Remove-Item Env:SETUP_RUN_LOG_DIR -ErrorAction SilentlyContinue

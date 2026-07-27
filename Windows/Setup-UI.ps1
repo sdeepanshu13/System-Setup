@@ -17,6 +17,247 @@ Add-Type -AssemblyName System.Drawing
 [System.Windows.Forms.Application]::EnableVisualStyles()
 
 # =====================================================================
+# USER PROFILE: load this person's saved selections (encrypted, git-synced)
+# =====================================================================
+# Each user is identified by their email or mobile number. Their selections
+# are stored ENCRYPTED (only they know the passphrase) under Windows\users\,
+# named by a hash of the identifier -- so even in a shared/public repo nobody
+# else can read them. On a new machine they enter the same email/mobile +
+# passphrase and their previous choices come back.
+
+$profileScript = Join-Path $PSScriptRoot 'UserProfile.ps1'
+if (Test-Path $profileScript) { . $profileScript }
+$otpScript = Join-Path $PSScriptRoot 'Otp.ps1'
+if (Test-Path $otpScript) { . $otpScript }
+
+$script:ProfileLoaded     = $false
+$script:ProfileIdentifier = $null
+$script:ProfilePassphrase = $null
+$script:ProfileName       = $null
+$script:SavedPackages     = $null
+$script:SavedFeatures     = $null
+$script:SavedShell        = $null
+$script:OtpChallenge      = $null
+$script:OtpVerified       = $false
+
+function Show-ProfileLoginDialog {
+    # Best-effort: pull the newest committed profiles so a returning user on a
+    # freshly cloned machine sees their latest saved selections.
+    if (Get-Command Sync-ProfileStore -ErrorAction SilentlyContinue) {
+        try { Sync-ProfileStore | Out-Null } catch { }
+    }
+
+    $dlg = New-Object System.Windows.Forms.Form
+    $dlg.Text = 'Sync your setup preferences'
+    $dlg.Size = New-Object System.Drawing.Size(460, 470)
+    $dlg.StartPosition = 'CenterScreen'
+    $dlg.FormBorderStyle = 'FixedDialog'
+    $dlg.MaximizeBox = $false
+    $dlg.MinimizeBox = $false
+    $dlg.BackColor = [System.Drawing.Color]::FromArgb(30, 30, 30)
+    $dlg.ForeColor = [System.Drawing.Color]::White
+    $dlg.Font = New-Object System.Drawing.Font('Segoe UI', 9.5)
+
+    $lblTitle = New-Object System.Windows.Forms.Label
+    $lblTitle.Text = 'Load / save your preferences'
+    $lblTitle.Font = New-Object System.Drawing.Font('Segoe UI', 13, [System.Drawing.FontStyle]::Bold)
+    $lblTitle.ForeColor = [System.Drawing.Color]::FromArgb(0, 180, 255)
+    $lblTitle.Location = New-Object System.Drawing.Point(20, 15)
+    $lblTitle.Size = New-Object System.Drawing.Size(420, 26)
+    $dlg.Controls.Add($lblTitle)
+
+    $lblInfo = New-Object System.Windows.Forms.Label
+    $lblInfo.Text = "Enter your email or mobile + a passphrase. We'll send a one-time code to verify it's yours. Your selections are then saved encrypted (only you can read them) and come back on any machine. Or click Skip to use defaults."
+    $lblInfo.ForeColor = [System.Drawing.Color]::FromArgb(170, 170, 170)
+    $lblInfo.Location = New-Object System.Drawing.Point(22, 44)
+    $lblInfo.Size = New-Object System.Drawing.Size(410, 50)
+    $dlg.Controls.Add($lblInfo)
+
+    function New-DlgLabel($text, $y) {
+        $l = New-Object System.Windows.Forms.Label
+        $l.Text = $text
+        $l.ForeColor = [System.Drawing.Color]::White
+        $l.Location = New-Object System.Drawing.Point(22, $y)
+        $l.Size = New-Object System.Drawing.Size(410, 18)
+        $dlg.Controls.Add($l)
+    }
+    function New-DlgBox($y, [bool]$mask) {
+        $t = New-Object System.Windows.Forms.TextBox
+        $t.Location = New-Object System.Drawing.Point(24, $y)
+        $t.Size = New-Object System.Drawing.Size(405, 24)
+        $t.BackColor = [System.Drawing.Color]::FromArgb(45, 45, 45)
+        $t.ForeColor = [System.Drawing.Color]::White
+        $t.BorderStyle = 'FixedSingle'
+        if ($mask) { $t.UseSystemPasswordChar = $true }
+        $dlg.Controls.Add($t)
+        return $t
+    }
+
+    New-DlgLabel 'Email or mobile number' 96
+    $tbId = New-DlgBox 116 $false
+    New-DlgLabel 'Your name (for git config, optional)' 146
+    $tbName = New-DlgBox 166 $false
+    New-DlgLabel 'Passphrase' 196
+    $tbPass = New-DlgBox 216 $true
+    New-DlgLabel 'Confirm passphrase (new users only)' 246
+    $tbConfirm = New-DlgBox 266 $true
+
+    $lblOtp = New-Object System.Windows.Forms.Label
+    $lblOtp.Text = 'Verification code'
+    $lblOtp.ForeColor = [System.Drawing.Color]::White
+    $lblOtp.Location = New-Object System.Drawing.Point(22, 296)
+    $lblOtp.Size = New-Object System.Drawing.Size(410, 18)
+    $lblOtp.Visible = $false
+    $dlg.Controls.Add($lblOtp)
+
+    $tbOtp = New-Object System.Windows.Forms.TextBox
+    $tbOtp.Location = New-Object System.Drawing.Point(24, 316)
+    $tbOtp.Size = New-Object System.Drawing.Size(405, 24)
+    $tbOtp.BackColor = [System.Drawing.Color]::FromArgb(45, 45, 45)
+    $tbOtp.ForeColor = [System.Drawing.Color]::White
+    $tbOtp.BorderStyle = 'FixedSingle'
+    $tbOtp.Visible = $false
+    $dlg.Controls.Add($tbOtp)
+
+    $lblStatus = New-Object System.Windows.Forms.Label
+    $lblStatus.ForeColor = [System.Drawing.Color]::FromArgb(255, 120, 120)
+    $lblStatus.Location = New-Object System.Drawing.Point(22, 348)
+    $lblStatus.Size = New-Object System.Drawing.Size(410, 18)
+    $dlg.Controls.Add($lblStatus)
+
+    $btnContinue = New-Object System.Windows.Forms.Button
+    $btnContinue.Text = 'Continue'
+    $btnContinue.Size = New-Object System.Drawing.Size(150, 34)
+    $btnContinue.Location = New-Object System.Drawing.Point(24, 372)
+    $btnContinue.FlatStyle = 'Flat'
+    $btnContinue.BackColor = [System.Drawing.Color]::FromArgb(0, 120, 212)
+    $btnContinue.ForeColor = [System.Drawing.Color]::White
+    $dlg.Controls.Add($btnContinue)
+
+    $btnSkip = New-Object System.Windows.Forms.Button
+    $btnSkip.Text = 'Skip'
+    $btnSkip.Size = New-Object System.Drawing.Size(110, 34)
+    $btnSkip.Location = New-Object System.Drawing.Point(319, 372)
+    $btnSkip.FlatStyle = 'Flat'
+    $btnSkip.BackColor = [System.Drawing.Color]::FromArgb(60, 60, 60)
+    $btnSkip.ForeColor = [System.Drawing.Color]::FromArgb(210, 210, 210)
+    $btnSkip.DialogResult = [System.Windows.Forms.DialogResult]::Ignore
+    $dlg.Controls.Add($btnSkip)
+    $dlg.CancelButton = $btnSkip
+
+    $btnContinue.Add_Click({
+        $lblStatus.ForeColor = [System.Drawing.Color]::FromArgb(255, 120, 120)
+        $lblStatus.Text = ''
+        $idText   = $tbId.Text.Trim()
+        $passText = $tbPass.Text
+
+        if ([string]::IsNullOrWhiteSpace($idText)) {
+            $lblStatus.Text = 'Enter your email or mobile, or click Skip.'; return
+        }
+        if ([string]::IsNullOrEmpty($passText)) {
+            $lblStatus.Text = 'A passphrase is required to protect your data.'; return
+        }
+        if (-not (Get-Command Read-UserProfile -ErrorAction SilentlyContinue)) {
+            $lblStatus.Text = 'Profile store unavailable; click Skip.'; return
+        }
+
+        # New accounts must confirm the passphrase (typo protection).
+        $exists = $false
+        if (Get-Command Test-UserProfileExists -ErrorAction SilentlyContinue) {
+            $exists = Test-UserProfileExists -Identifier $idText
+        }
+        if (-not $exists -and ($tbPass.Text -ne $tbConfirm.Text)) {
+            $lblStatus.Text = "Passphrases don't match (new account)."; return
+        }
+
+        # --- OTP gate: prove the person controls this email / mobile ---
+        if (-not $script:OtpVerified -and (Get-Command New-OtpChallenge -ErrorAction SilentlyContinue)) {
+            if (-not $script:OtpChallenge) {
+                $chan = if ($idText -match '@') { 'email' } else { 'mobile' }
+                $norm = ConvertTo-ProfileKey $idText
+                $btnContinue.Enabled = $false
+                $lblStatus.ForeColor = [System.Drawing.Color]::FromArgb(170, 170, 170)
+                $lblStatus.Text = 'Sending verification code...'
+                $dlg.Refresh()
+                $script:OtpChallenge = New-OtpChallenge -Channel $chan -Target $norm.Value
+                $btnContinue.Enabled = $true
+                if (-not $script:OtpChallenge.Sent) {
+                    $errMsg = $script:OtpChallenge.Error
+                    $script:OtpChallenge = $null
+                    $lblStatus.ForeColor = [System.Drawing.Color]::FromArgb(255, 120, 120)
+                    $lblStatus.Text = "Couldn't send code: $errMsg. Configure SMTP/SMS or click Skip."
+                    return
+                }
+                $lblOtp.Visible = $true
+                $tbOtp.Visible = $true
+                $tbOtp.Focus()
+                $btnContinue.Text = 'Verify & continue'
+                $lblStatus.ForeColor = [System.Drawing.Color]::FromArgb(120, 220, 120)
+                if ($script:OtpChallenge.Method -eq 'dev') {
+                    $lblStatus.Text = 'Dev mode: code printed to the console. Enter it above.'
+                }
+                else {
+                    $lblStatus.Text = "We sent a code to your $chan. Enter it above."
+                }
+                return
+            }
+            else {
+                $chk = Test-OtpResponse -Challenge $script:OtpChallenge -InputCode $tbOtp.Text
+                if (-not $chk.Ok) {
+                    $lblStatus.ForeColor = [System.Drawing.Color]::FromArgb(255, 120, 120)
+                    $lblStatus.Text = "Code: $($chk.Reason)"
+                    if ($chk.Reason -match 'expired|too many') {
+                        $script:OtpChallenge = $null
+                        $tbOtp.Visible = $false
+                        $lblOtp.Visible = $false
+                        $btnContinue.Text = 'Continue'
+                    }
+                    return
+                }
+                $script:OtpVerified = $true
+            }
+        }
+
+        # --- Verified (or OTP unavailable): load or create the profile ---
+        $res = Read-UserProfile -Identifier $idText -Passphrase $passText
+        if ($res.Found -and $res.Decrypted) {
+            $script:ProfileLoaded = $true
+            $script:SavedPackages = @($res.Data.packages)
+            $script:SavedFeatures = @($res.Data.features)
+            $script:SavedShell    = [string]$res.Data.defaultShell
+            if (-not $tbName.Text -and $res.Data.name) { $script:ProfileName = [string]$res.Data.name }
+        }
+        elseif ($res.Found -and $res.Error -eq 'corrupt') {
+            $lblStatus.Text = 'That profile file is corrupt and cannot be read.'; return
+        }
+        elseif ($res.Found) {
+            $lblStatus.Text = 'Incorrect passphrase for this account.'; return
+        }
+
+        $script:ProfileIdentifier = $idText
+        $script:ProfilePassphrase = $passText
+        if ($tbName.Text) { $script:ProfileName = $tbName.Text.Trim() }
+        $dlg.DialogResult = [System.Windows.Forms.DialogResult]::OK
+        $dlg.Close()
+    })
+
+    [void]$dlg.ShowDialog()
+    $dlg.Dispose()
+}
+
+Show-ProfileLoginDialog
+
+# Build fast lookup sets from the loaded profile (if any).
+$savedPkgSet  = $null
+$savedFeatSet = $null
+if ($script:ProfileLoaded) {
+    $savedPkgSet  = New-Object 'System.Collections.Generic.HashSet[string]'
+    $savedFeatSet = New-Object 'System.Collections.Generic.HashSet[string]'
+    foreach ($p in $script:SavedPackages) { if ($p) { [void]$savedPkgSet.Add([string]$p) } }
+    foreach ($f in $script:SavedFeatures) { if ($f) { [void]$savedFeatSet.Add([string]$f) } }
+}
+
+# =====================================================================
 # DATA: each item is a separate checkbox, grouped under section headings
 # =====================================================================
 
@@ -231,7 +472,8 @@ foreach ($section in $sections) {
         $cb = New-Object System.Windows.Forms.CheckBox
         $cb.Text = $item.Name
         $cb.Tag  = $item.PkgId
-        $cb.Checked = $item.Checked
+        if ($savedPkgSet) { $cb.Checked = $savedPkgSet.Contains([string]$item.PkgId) }
+        else { $cb.Checked = $item.Checked }
         $cb.Font = $checkFont
         $cb.ForeColor = $checkColor
         $xOff = $(if ($col % 2 -eq 0) { 20 } else { $colWidth + 20 })
@@ -260,7 +502,8 @@ foreach ($fSection in $featureToggles) {
         $cb = New-Object System.Windows.Forms.CheckBox
         $cb.Text = $item.Name
         $cb.Tag  = $item.Flag
-        $cb.Checked = $item.Checked
+        if ($savedFeatSet) { $cb.Checked = $savedFeatSet.Contains([string]$item.Flag) }
+        else { $cb.Checked = $item.Checked }
         $cb.Font = $checkFont
         $cb.ForeColor = $checkColor
         $xOff = $(if ($col % 2 -eq 0) { 20 } else { $colWidth + 20 })
@@ -288,6 +531,7 @@ $shellOptions = @(
     @{ Id='5'; Name='Keep current (don''t change)' }
 )
 
+$defaultShellId = if ($script:ProfileLoaded -and $script:SavedShell) { $script:SavedShell } else { '1' }
 $radioButtons = @()
 $col = 0
 foreach ($opt in $shellOptions) {
@@ -296,7 +540,7 @@ foreach ($opt in $shellOptions) {
     $rb.Tag  = $opt.Id
     $rb.Font = $checkFont
     $rb.ForeColor = $checkColor
-    $rb.Checked = ($opt.Id -eq '1')
+    $rb.Checked = ($opt.Id -eq $defaultShellId)
     $xOff = $(if ($col % 2 -eq 0) { 20 } else { $colWidth + 20 })
     $rb.Location = New-Object System.Drawing.Point($xOff, $y)
     $rb.Size = New-Object System.Drawing.Size(($colWidth - 10), 22)
@@ -326,7 +570,7 @@ $selectAllBtn.Add_Click({
 $form.Controls.Add($selectAllBtn)
 
 $selectNoneBtn = New-Object System.Windows.Forms.Button
-$selectNoneBtn.Text = 'Select None'
+$selectNoneBtn.Text = 'Deselect All'
 $selectNoneBtn.Location = New-Object System.Drawing.Point(110, $btnY)
 $selectNoneBtn.Size = New-Object System.Drawing.Size(90, 32)
 $selectNoneBtn.FlatStyle = 'Flat'
@@ -396,6 +640,28 @@ if ($result -eq [System.Windows.Forms.DialogResult]::OK) {
     if ($selectedFeats -match 'npm|pipx|rust|golang|maven|gradle') { $catIds += 12 }
     if ($selectedFeats -match 'gitssh')   { $catIds += 13 }
     $env:SETUP_CATEGORIES = ($catIds | Sort-Object -Unique) -join ','
+
+    # --- Save this user's selections (encrypted) + tell Setup.ps1 to publish ---
+    if ($script:ProfileIdentifier -and $script:ProfilePassphrase -and
+        (Get-Command Write-UserProfile -ErrorAction SilentlyContinue)) {
+        try {
+            $profilePath = Write-UserProfile -Identifier $script:ProfileIdentifier `
+                -Passphrase $script:ProfilePassphrase -Data @{
+                    name         = $script:ProfileName
+                    packages     = ($allPkgCheckBoxes  | Where-Object { $_.Checked } | ForEach-Object { [string]$_.Tag })
+                    features     = ($allFeatCheckBoxes | Where-Object { $_.Checked } | ForEach-Object { [string]$_.Tag })
+                    defaultShell = $shellChoice
+                }
+            $env:SETUP_PROFILE_PATH = $profilePath
+            if ($script:ProfileName) { $env:SETUP_USER_NAME = $script:ProfileName }
+            $norm = ConvertTo-ProfileKey $script:ProfileIdentifier
+            if ($norm.Type -eq 'email') { $env:SETUP_USER_EMAIL = $norm.Value }
+            Write-Host "Saved encrypted profile: $profilePath" -ForegroundColor DarkGray
+        }
+        catch {
+            Write-Warning "Could not save your profile: $_"
+        }
+    }
 
     Write-Host "Packages:  $selectedPkgs"
     Write-Host "Features:  $selectedFeats"

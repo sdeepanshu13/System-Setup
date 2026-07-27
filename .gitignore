@@ -9,6 +9,11 @@ Windows/github-ssh-pubkey.txt
 Windows/git-fallback-install.log
 Windows/CodeSigning.cer
 
+# Local OTP delivery config + dev codes -- NEVER commit secrets.
+# (Encrypted user profiles Windows/users/*.json ARE committed on purpose.)
+Windows/users/.otp-config.json
+Windows/users/.otp-dev.txt
+
 # OS junk
 Thumbs.db
 Desktop.ini

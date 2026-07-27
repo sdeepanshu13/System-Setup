@@ -77,11 +77,53 @@ trap {
 }
 
 # --- Validation -------------------------------------------
-if (-not (Get-Command winget -ErrorAction SilentlyContinue)) {
-    Write-Error "winget is not installed. Install App Installer from the Microsoft Store."
+# winget is frequently present but NOT on PATH in a freshly-elevated shell
+# (the per-user WindowsApps alias directory isn't inherited). Resolve it
+# explicitly, register App Installer as a last resort, and prepend its folder
+# to PATH so every bare `winget` call below works.
+function Resolve-Winget {
+    $cmd = Get-Command winget.exe -ErrorAction SilentlyContinue
+    if ($cmd) { return $cmd.Source }
+    $candidates = @(Join-Path $env:LOCALAPPDATA 'Microsoft\WindowsApps\winget.exe')
+    $pkgRoot = Join-Path $env:ProgramFiles 'WindowsApps'
+    if (Test-Path $pkgRoot) {
+        try {
+            $match = Get-ChildItem -Path $pkgRoot -Filter 'winget.exe' -Recurse -ErrorAction SilentlyContinue |
+                Where-Object { $_.FullName -match 'Microsoft\.DesktopAppInstaller' } |
+                Select-Object -First 1
+            if ($match) { $candidates += $match.FullName }
+        }
+        catch { }
+    }
+    foreach ($c in $candidates) { if ($c -and (Test-Path $c)) { return $c } }
+    return $null
+}
+
+$wingetPath = Resolve-Winget
+if (-not $wingetPath) {
+    Write-Warning "winget not found on PATH. Attempting to register App Installer..."
+    try {
+        Get-AppxPackage -Name 'Microsoft.DesktopAppInstaller' -ErrorAction SilentlyContinue |
+            ForEach-Object {
+                Add-AppxPackage -DisableDevelopmentMode -Register `
+                    "$($_.InstallLocation)\AppXManifest.xml" -ErrorAction SilentlyContinue
+            }
+    }
+    catch { }
+    $wingetPath = Resolve-Winget
+}
+if (-not $wingetPath) {
+    Write-Error @"
+winget (App Installer) is not available.
+Install 'App Installer' from the Microsoft Store or from https://aka.ms/getwinget
+then re-run this script.
+"@
     if ($script:OwnTranscript) { try { Stop-Transcript | Out-Null } catch { } }
     exit 1
 }
+$wingetDir = Split-Path -Parent $wingetPath
+if ($env:Path -notlike "*$wingetDir*") { $env:Path = "$wingetDir;$env:Path" }
+Write-Host "Using winget: $wingetPath" -ForegroundColor DarkGray
 
 if (-not (Test-Path $wingetJson)) {
     Write-Error "winget-packages.json not found in $ScriptDir"

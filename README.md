@@ -42,14 +42,9 @@ Next time -- even on a brand-new PC -- enter the same email/mobile + passphrase
 and your previous selections come back automatically.
 
 **Your data stays private.** It's stored **encrypted** (AES-256; only your
-passphrase can unlock it), and the file is named after a one-way hash of your
-email/mobile -- so even though it lives in this repo, nobody else can read it or
-tell whose it is. Forgot your passphrase or don't want this? Just click **Skip**
-and use the defaults.
-
-> Verification codes are only sent if an email (SMTP) or SMS provider has been
-> configured -- see [Windows/README.md](Windows/README.md#user-profiles-encrypted-git-synced).
-> Preferences sync over git, so you need push access (your own fork or clone).
+passphrase can unlock it), so nobody else -- not even whoever runs the database --
+can read your selections. Forgot your passphrase or don't want this? Just click
+**Skip** and use the defaults.
 
 ---
 

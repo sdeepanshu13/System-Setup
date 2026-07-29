@@ -78,43 +78,68 @@ package and feature checkbox at once.
 
 The first screen (`Show-ProfileLoginDialog` in `Setup-UI.ps1`) lets a user save
 their selections and restore them on any machine. Logic lives in
-`UserProfile.ps1` (storage + crypto) and `Otp.ps1` (verification).
+`UserProfile.ps1` (crypto + local store), `SupabaseStore.ps1` (online store +
+server-side OTP) and `Otp.ps1` (offline OTP).
 
-**Identity & lookup**
+There are two backends. Supabase is used automatically when configured;
+otherwise it falls back to encrypted JSON files synced through git.
+
+| | Supabase (default) | Offline fallback |
+|---|---|---|
+| Storage | `public.user_profiles` table | `Windows\users\<hash>.json` |
+| OTP | Supabase Auth, **verified server-side** | generated locally (bypassable) |
+| Sync | any user, any machine | needs git push access |
+| Delivery config | none -- built in | your SMTP/Twilio creds |
+
+### Supabase setup (one-time)
+
+1. Run [`supabase-schema.sql`](supabase-schema.sql) in Dashboard -> SQL Editor.
+   It creates `user_profiles` and RLS policies scoped to `auth.uid()`.
+2. `supabase-config.json` holds the project URL + **publishable** key. Override
+   with `SETUP_SUPABASE_URL` / `SETUP_SUPABASE_KEY`.
+3. For volume, set a custom SMTP provider in Auth settings -- the built-in mailer
+   is rate-limited to a few messages per hour.
+
+> Never put the **secret / service-role** key in this repo or in `Setup.exe`. It
+> bypasses RLS entirely. Only the publishable key is safe to ship.
+
+Phone OTP additionally requires an SMS provider configured in Supabase Auth;
+email works out of the box.
+
+### Identity & lookup
 - Primary key = the user's email or mobile, normalised (email lowercased, mobile
-  reduced to digits).
-- File name = `SHA-256(normalised key)` (first 32 hex chars) -- the raw
-  email/phone is never written to disk: `Windows\users\<hash>.json`.
+  reduced to digits, `+` prefixed for Supabase E.164).
+- Offline mode file name = `SHA-256(normalised key)` (first 32 hex chars) -- the
+  raw email/phone is never written to disk.
+- Supabase mode keys rows by `auth.users.id` (uuid).
 
-**Encryption (only the user can read it)**
+### Encryption (only the user can read it)
 - Payload (name, packages, features, default shell) -> JSON -> **AES-256-CBC**.
 - Key derived from the user's **passphrase** via **PBKDF2-SHA256** (200k
   iterations, random 16-byte salt).
 - Integrity via **HMAC-SHA256** over IV+ciphertext (encrypt-then-MAC). A wrong
-  passphrase or any tampering fails the MAC -> `Decrypted = $false`.
-- The passphrase is never stored, logged, or committed.
+  passphrase or any tampering fails the MAC.
+- The passphrase is never stored, logged, transmitted, or committed. The database
+  only ever holds ciphertext -- the project owner cannot read user selections.
 
-**OTP verification (proves ownership of the email/mobile)**
-- On "Continue" a 6-digit code (crypto RNG) is generated and sent; only its
-  salted hash + expiry (5 min) + attempt cap (5) are kept in memory.
-- Delivery reads credentials ONLY from env vars or a git-ignored
-  `Windows\users\.otp-config.json` -- never hard-coded:
+### Offline OTP delivery (fallback only)
+Credentials come ONLY from env vars or a git-ignored
+`Windows\users\.otp-config.json` -- never hard-coded:
 
-  | Channel | Variables |
-  |---------|-----------|
-  | Email (SMTP) | `SETUP_OTP_SMTP_HOST` `SETUP_OTP_SMTP_PORT` `SETUP_OTP_SMTP_USER` `SETUP_OTP_SMTP_PASS` `SETUP_OTP_SMTP_FROM` `SETUP_OTP_SMTP_SSL` |
-  | SMS (Twilio) | `SETUP_OTP_TWILIO_SID` `SETUP_OTP_TWILIO_TOKEN` `SETUP_OTP_TWILIO_FROM` |
-  | SMS (generic HTTP POST) | `SETUP_OTP_SMS_API_URL` `SETUP_OTP_SMS_API_KEY` `SETUP_OTP_SMS_FROM` |
-  | Local test | `SETUP_OTP_DEV=1` -> prints the code to console + git-ignored `.otp-dev.txt` |
+| Channel | Variables |
+|---------|-----------|
+| Email (SMTP) | `SETUP_OTP_SMTP_HOST` `SETUP_OTP_SMTP_PORT` `SETUP_OTP_SMTP_USER` `SETUP_OTP_SMTP_PASS` `SETUP_OTP_SMTP_FROM` `SETUP_OTP_SMTP_SSL` |
+| SMS (Twilio) | `SETUP_OTP_TWILIO_SID` `SETUP_OTP_TWILIO_TOKEN` `SETUP_OTP_TWILIO_FROM` |
+| SMS (generic HTTP POST) | `SETUP_OTP_SMS_API_URL` `SETUP_OTP_SMS_API_KEY` `SETUP_OTP_SMS_FROM` |
+| Local test | `SETUP_OTP_DEV=1` -> prints the code to console + git-ignored `.otp-dev.txt` |
 
-- If no channel is configured, the user can still click **Skip** and use defaults.
+A 6-digit code (crypto RNG) is generated; only its salted hash + expiry (5 min) +
+attempt cap (5) are kept in memory. Users can always click **Skip**.
 
-**Sync**
+### Git sync (offline mode)
 - `Publish-ProfileStore` git-adds ONLY the single `users\<hash>.json`, commits,
   and pushes (best-effort, never fatal). Logs / SSH keys are never staged.
-- `Sync-ProfileStore` runs a best-effort `git pull --ff-only` before lookup so a
-  returning user on a freshly-cloned machine sees their latest data.
-- Requires push access -- fork/clone the repo to sync your own profiles.
+- `Sync-ProfileStore` runs a best-effort `git pull --ff-only` before lookup.
 
 ---
 

@@ -1,0 +1,363 @@
+{
+    "_comment": "Homebrew catalogue for the macOS installer. 'formula' = CLI, 'cask' = GUI app.",
+    "sections": [
+        {
+            "heading": "Developer Tools & IDEs",
+            "items": [
+                {
+                    "name": "Git",
+                    "id": "git",
+                    "type": "formula",
+                    "default": true
+                },
+                {
+                    "name": "GitHub CLI",
+                    "id": "gh",
+                    "type": "formula",
+                    "default": true
+                },
+                {
+                    "name": "GitHub Desktop",
+                    "id": "github",
+                    "type": "cask",
+                    "default": true
+                },
+                {
+                    "name": "Visual Studio Code",
+                    "id": "visual-studio-code",
+                    "type": "cask",
+                    "default": true
+                },
+                {
+                    "name": "JetBrains Toolbox",
+                    "id": "jetbrains-toolbox",
+                    "type": "cask",
+                    "default": true
+                },
+                {
+                    "name": "Docker Desktop",
+                    "id": "docker",
+                    "type": "cask",
+                    "default": true
+                },
+                {
+                    "name": "Warp Terminal",
+                    "id": "warp",
+                    "type": "cask",
+                    "default": true
+                },
+                {
+                    "name": "iTerm2",
+                    "id": "iterm2",
+                    "type": "cask",
+                    "default": true
+                }
+            ]
+        },
+        {
+            "heading": "Programming Languages",
+            "items": [
+                {
+                    "name": "Python 3.12",
+                    "id": "python@3.12",
+                    "type": "formula",
+                    "default": true
+                },
+                {
+                    "name": "Node.js LTS",
+                    "id": "node",
+                    "type": "formula",
+                    "default": true
+                },
+                {
+                    "name": "nvm",
+                    "id": "nvm",
+                    "type": "formula",
+                    "default": true
+                },
+                {
+                    "name": ".NET SDK",
+                    "id": "dotnet-sdk",
+                    "type": "cask",
+                    "default": true
+                },
+                {
+                    "name": "Java JDK 21 (Temurin)",
+                    "id": "temurin@21",
+                    "type": "cask",
+                    "default": true
+                },
+                {
+                    "name": "Java JDK 17 (Temurin)",
+                    "id": "temurin@17",
+                    "type": "cask",
+                    "default": false
+                },
+                {
+                    "name": "Go",
+                    "id": "go",
+                    "type": "formula",
+                    "default": true
+                },
+                {
+                    "name": "Rust (rustup)",
+                    "id": "rustup",
+                    "type": "formula",
+                    "default": true
+                },
+                {
+                    "name": "LLVM / Clang",
+                    "id": "llvm",
+                    "type": "formula",
+                    "default": false
+                },
+                {
+                    "name": "CMake",
+                    "id": "cmake",
+                    "type": "formula",
+                    "default": true
+                },
+                {
+                    "name": "Ninja Build",
+                    "id": "ninja",
+                    "type": "formula",
+                    "default": true
+                }
+            ]
+        },
+        {
+            "heading": "Web Browsers",
+            "items": [
+                {
+                    "name": "Google Chrome",
+                    "id": "google-chrome",
+                    "type": "cask",
+                    "default": true
+                },
+                {
+                    "name": "Mozilla Firefox",
+                    "id": "firefox",
+                    "type": "cask",
+                    "default": true
+                }
+            ]
+        },
+        {
+            "heading": "Cloud & CLI Tools",
+            "items": [
+                {
+                    "name": "Azure CLI",
+                    "id": "azure-cli",
+                    "type": "formula",
+                    "default": true
+                },
+                {
+                    "name": "PowerShell 7",
+                    "id": "powershell",
+                    "type": "cask",
+                    "default": true
+                },
+                {
+                    "name": "Redis",
+                    "id": "redis",
+                    "type": "formula",
+                    "default": true
+                },
+                {
+                    "name": "jq",
+                    "id": "jq",
+                    "type": "formula",
+                    "default": true
+                },
+                {
+                    "name": "wget",
+                    "id": "wget",
+                    "type": "formula",
+                    "default": true
+                },
+                {
+                    "name": "ripgrep",
+                    "id": "ripgrep",
+                    "type": "formula",
+                    "default": true
+                },
+                {
+                    "name": "fzf",
+                    "id": "fzf",
+                    "type": "formula",
+                    "default": true
+                },
+                {
+                    "name": "htop",
+                    "id": "htop",
+                    "type": "formula",
+                    "default": true
+                }
+            ]
+        },
+        {
+            "heading": "Office & Productivity",
+            "items": [
+                {
+                    "name": "Microsoft Teams",
+                    "id": "microsoft-teams",
+                    "type": "cask",
+                    "default": true
+                },
+                {
+                    "name": "Microsoft Office",
+                    "id": "microsoft-office",
+                    "type": "cask",
+                    "default": false
+                },
+                {
+                    "name": "OneDrive",
+                    "id": "onedrive",
+                    "type": "cask",
+                    "default": true
+                },
+                {
+                    "name": "Google Drive",
+                    "id": "google-drive",
+                    "type": "cask",
+                    "default": false
+                },
+                {
+                    "name": "Adobe Acrobat Reader",
+                    "id": "adobe-acrobat-reader",
+                    "type": "cask",
+                    "default": false
+                },
+                {
+                    "name": "Rectangle (window mgr)",
+                    "id": "rectangle",
+                    "type": "cask",
+                    "default": true
+                }
+            ]
+        },
+        {
+            "heading": "Media & Utilities",
+            "items": [
+                {
+                    "name": "VLC Media Player",
+                    "id": "vlc",
+                    "type": "cask",
+                    "default": true
+                },
+                {
+                    "name": "Unity Hub",
+                    "id": "unity-hub",
+                    "type": "cask",
+                    "default": false
+                },
+                {
+                    "name": "The Unarchiver",
+                    "id": "the-unarchiver",
+                    "type": "cask",
+                    "default": true
+                }
+            ]
+        },
+        {
+            "heading": "Shell & Prompt",
+            "items": [
+                {
+                    "name": "Zsh",
+                    "id": "zsh",
+                    "type": "formula",
+                    "default": true
+                },
+                {
+                    "name": "Oh My Posh",
+                    "id": "oh-my-posh",
+                    "type": "formula",
+                    "default": false
+                },
+                {
+                    "name": "MesloLGS Nerd Font",
+                    "id": "font-meslo-lg-nerd-font",
+                    "type": "cask",
+                    "default": true
+                }
+            ]
+        }
+    ],
+    "features": [
+        {
+            "heading": "Shell Setup",
+            "items": [
+                {
+                    "name": "Oh My Zsh + Powerlevel10k",
+                    "flag": "zsh",
+                    "default": true
+                },
+                {
+                    "name": "Zsh plugins (autosuggestions, syntax)",
+                    "flag": "zshplugins",
+                    "default": true
+                }
+            ]
+        },
+        {
+            "heading": "Dev Environment",
+            "items": [
+                {
+                    "name": "Git config + SSH key",
+                    "flag": "gitssh",
+                    "default": true
+                },
+                {
+                    "name": "VS Code extensions",
+                    "flag": "vscode",
+                    "default": true
+                },
+                {
+                    "name": "npm globals (React, TS, ESLint, Prettier)",
+                    "flag": "npm",
+                    "default": true
+                },
+                {
+                    "name": "Python pipx tools (uv, ruff, poetry, black)",
+                    "flag": "pipx",
+                    "default": true
+                },
+                {
+                    "name": "Rust toolchain (stable + clippy)",
+                    "flag": "rust",
+                    "default": true
+                },
+                {
+                    "name": "Go workspace setup",
+                    "flag": "golang",
+                    "default": true
+                },
+                {
+                    "name": "Maven",
+                    "flag": "maven",
+                    "default": false
+                },
+                {
+                    "name": "Gradle",
+                    "flag": "gradle",
+                    "default": false
+                }
+            ]
+        },
+        {
+            "heading": "macOS System",
+            "items": [
+                {
+                    "name": "macOS defaults (Dock, Finder, keyboard)",
+                    "flag": "macdefaults",
+                    "default": false
+                },
+                {
+                    "name": "Xcode Command Line Tools",
+                    "flag": "xcodeclt",
+                    "default": true
+                }
+            ]
+        }
+    ]
+}

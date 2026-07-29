@@ -30,6 +30,21 @@ That's it. Your machine is ready.
 
 ---
 
+## On a Mac
+
+```bash
+git clone https://github.com/sdeepanshu13/System-Setup.git
+cd System-Setup/Mac && chmod +x Setup.sh && ./Setup.sh
+```
+
+Installs Homebrew and everything else for you. Same apps, same shell setup, and
+the **same preferences** -- sign in with the email you used on Windows and your
+selections come straight back.
+
+See [Mac/README.md](Mac/README.md) for details.
+
+---
+
 ## Sync your preferences across machines (optional)
 
 The first screen lets you save your exact selections and reuse them anywhere:

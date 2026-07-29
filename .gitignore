@@ -3,6 +3,7 @@ dist/
 
 # Per-run logs
 Windows/logs/
+Mac/logs/
 
 # Generated files
 Windows/github-ssh-pubkey.txt

@@ -1,4 +1,8 @@
-{
-    "url": "https://evwduvhdoqgnnqlexjpv.supabase.co",
-    "publishableKey": "sb_publishable_BMD7XGiIQbnAmrBsz3fWzw_Rty5sW9I"
+﻿{
+    "_comment":  "Obfuscated config. Regenerate with Protect-Config.ps1. Publishable key only -- never the secret key.",
+    "v":  1,
+    "salt":  "Un9yM0SMUCR5Sy2JAUrLBA==",
+    "iv":  "Vrek62Z0jCwzAYD3xdIs2w==",
+    "mac":  "LzeKBAeIlPUSpXKLsx3t96/S8UmdVSUxrDgB+uP+76E=",
+    "cipher":  "ad+GcdnCv7xVuX+fjCzxb8mEax6++b/OaD8BCbEo/+fjB3GIwTUR/H3j5un/9wdAK/XWSJcYGmEY9ODyyFgeBndan421Nu3zE8w0nLDh0hHhQ0k2rP7Hy0GHcpXe9MzX8tu6PZ+6TnuQNoEt1fbeQEJB5wc1pGb04JESZS1pl44="
 }

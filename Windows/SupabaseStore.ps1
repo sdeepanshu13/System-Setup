@@ -33,6 +33,15 @@ try {
 }
 catch { }
 
+function Get-ConfigObfuscationKey {
+    # Obfuscation only -- this ships with the app, so it hides the keys from
+    # casual scraping (bots crawling the public repo), not from a determined user.
+    # That's acceptable: the publishable key is meant to be public and RLS is
+    # what actually protects the data.
+    $parts = @('System', 'Setup', 'cfg', 'v1')
+    return ($parts -join '/')
+}
+
 function Get-SupabaseConfig {
     if ($script:SupabaseConfigCache) { return $script:SupabaseConfigCache }
     $cfg = @{ Url = $null; Key = $null }
@@ -41,6 +50,14 @@ function Get-SupabaseConfig {
     if (Test-Path $file) {
         try {
             $json = Get-Content $file -Raw | ConvertFrom-Json
+            if ($json.PSObject.Properties.Name -contains 'cipher' -and $json.cipher) {
+                if (-not (Get-Command Unprotect-ProfilePayload -ErrorAction SilentlyContinue)) {
+                    $up = Join-Path $script:SupabaseBaseDir 'UserProfile.ps1'
+                    if (Test-Path $up) { . $up }
+                }
+                $plain = Unprotect-ProfilePayload -Record $json -Passphrase (Get-ConfigObfuscationKey)
+                if ($plain) { $json = $plain | ConvertFrom-Json }
+            }
             if ($json.url) { $cfg.Url = [string]$json.url }
             if ($json.publishableKey) { $cfg.Key = [string]$json.publishableKey }
         }
@@ -52,6 +69,11 @@ function Get-SupabaseConfig {
     if (-not [string]::IsNullOrWhiteSpace($envKey)) { $cfg.Key = $envKey }
 
     if ($cfg.Url) { $cfg.Url = $cfg.Url.TrimEnd('/') }
+    # A secret key must never be used from client code, even if one is injected.
+    if ($cfg.Key -and ($cfg.Key -like 'sb_secret*' -or $cfg.Key -like '*service_role*')) {
+        Write-Warning 'Refusing to use a Supabase secret key in client code. Use the publishable key.'
+        $cfg.Key = $null
+    }
     $script:SupabaseConfigCache = $cfg
     return $cfg
 }

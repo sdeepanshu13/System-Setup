@@ -8,23 +8,23 @@ Download. Double-click. Pick what you want. Done.
 
 ## Download
 
-**[Download System-Setup.zip](https://github.com/sdeepanshu13/System-Setup/releases/latest/download/System-Setup.zip)**
+**[Download Setup.exe](https://github.com/sdeepanshu13/System-Setup/releases/latest/download/Setup.exe)**
 
-Extract it. Double-click **`Setup.cmd`** inside. That's it.
+One file. Double-click it. That's it.
 
-No exe warnings. No SmartScreen. No Defender blocks.
+No extracting, no scripts to poke at, no configuration. Everything it needs is
+bundled inside and cleaned up when it's done.
 
 ---
 
 ## How to use
 
-1. **Download** `System-Setup.zip` from the link above
-2. **Extract** the zip (right-click > Extract All)
-3. **Double-click** `Setup.cmd` inside the extracted folder
-4. **Check/uncheck** what you want in the GUI (or use **Select All** / **Deselect All**)
-5. **Pick** your default terminal
-6. **Click Install**
-7. **Reboot** once when it finishes
+1. **Download** `Setup.exe` from the link above
+2. **Double-click** it (approve the Administrator prompt)
+3. **Check/uncheck** what you want in the GUI (or use **Select All** / **Deselect All**)
+4. **Pick** your default terminal
+5. **Click Install**
+6. **Reboot** once when it finishes
 
 That's it. Your machine is ready.
 
@@ -118,7 +118,7 @@ Each is a separate checkbox:
 
 | Problem | Solution |
 |---------|----------|
-| SmartScreen warning | This shouldn't happen with the .zip distribution. If it does, right-click > Properties > Unblock on the zip before extracting. |
+| SmartScreen warning | Click **More info** > **Run anyway**. The file is unsigned; see Sign-Scripts.ps1 to sign your own build. |
 | Weird characters in terminal | Set your terminal font to **MesloLGS NF** |
 | A package failed to install | Re-run Setup.exe. Already-installed packages are skipped automatically. |
 | WSL not working | Reboot first. It needs a restart. |

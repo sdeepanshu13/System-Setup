@@ -95,16 +95,51 @@ otherwise it falls back to encrypted JSON files synced through git.
 
 1. Run [`supabase-schema.sql`](supabase-schema.sql) in Dashboard -> SQL Editor.
    It creates `user_profiles` and RLS policies scoped to `auth.uid()`.
-2. `supabase-config.json` holds the project URL + **publishable** key. Override
-   with `SETUP_SUPABASE_URL` / `SETUP_SUPABASE_KEY`.
+2. `supabase-config.json` holds the project URL + **publishable** key, stored
+   obfuscated. Regenerate it with `.\Protect-Config.ps1 -Url ... -PublishableKey ...`.
+   Override at runtime with `SETUP_SUPABASE_URL` / `SETUP_SUPABASE_KEY`.
 3. For volume, set a custom SMTP provider in Auth settings -- the built-in mailer
    is rate-limited to a few messages per hour.
 
-> Never put the **secret / service-role** key in this repo or in `Setup.exe`. It
-> bypasses RLS entirely. Only the publishable key is safe to ship.
+#### Key safety
 
-Phone OTP additionally requires an SMS provider configured in Supabase Auth;
-email works out of the box.
+| Key | Where it may live |
+|-----|-------------------|
+| Publishable (`sb_publishable_...`) | shipped in the app -- safe, RLS protects the data |
+| Secret / service-role (`sb_secret_...`) | **server-side only** -- never in this repo or the exe |
+
+A service-role key bypasses every RLS policy: anyone who extracts it can read,
+alter, or delete all users' rows. Client-side encryption cannot protect it,
+because the app must decrypt it to use it -- so the unlock key ships too. It is
+also unnecessary: OTP and profile read/write all work with the publishable key
+plus the user's JWT.
+
+Guards in place: `Get-SupabaseConfig` refuses any key that looks like a secret,
+`.gitignore` blocks `.env*`, and the release workflow fails the build if
+`sb_secret`/`service_role` appears in the compiled exe.
+
+The config obfuscation stops bots scraping the public repo; it is not secrecy,
+and the publishable key doesn't need it to be.
+
+---
+
+## Single-file distribution
+
+`Build-Exe.ps1` base64-embeds every script into one `Setup.exe` (ps2exe,
+`requireAdmin`). At runtime it extracts to a randomly named temp folder, runs,
+and deletes it in a `finally` block -- so users get one file and no loose scripts.
+
+`.github/workflows/release.yml` builds it on `windows-latest`, scans the binary
+for secret keys, and attaches it to the GitHub Release. Publish with:
+
+```bash
+git tag v1.0.1 && git push origin v1.0.1
+```
+
+> ps2exe bundles PowerShell source; it deters casual inspection but is not
+> tamper-proof. Don't rely on it to hide anything that must stay secret.
+
+---
 
 ### Identity & lookup
 - Primary key = the user's email or mobile, normalised (email lowercased, mobile

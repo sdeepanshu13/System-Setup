@@ -10,15 +10,16 @@ Windows/git-fallback-install.log
 Windows/CodeSigning.cer
 
 # Local OTP delivery config + dev codes -- NEVER commit secrets.
-# (Encrypted user profiles Windows/users/*.json ARE committed on purpose.)
-Windows/users/.otp-config.json
-Windows/users/.otp-dev.txt
+# (Encrypted user profiles Shared/profiles/*.json ARE committed on purpose.)
+Shared/Config/.otp-config.json
+Shared/Config/.otp-dev.txt
+Windows/users/
 
 # Supabase secret / service-role keys must never be committed.
-# Only supabase-config.json (URL + publishable key) is tracked.
+# Only Shared/Config/supabase-config.json (URL + publishable key) is tracked.
 .env
 .env.local
-Windows/supabase-secret*.json
+**/supabase-secret*.json
 
 # OS junk
 Thumbs.db

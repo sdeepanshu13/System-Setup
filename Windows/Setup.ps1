@@ -36,10 +36,6 @@ param(
 $ErrorActionPreference = 'Continue'
 $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Definition
 
-# Load the encrypted user-profile helpers (used to publish saved selections).
-$profileHelper = Join-Path $ScriptDir 'UserProfile.ps1'
-if (Test-Path $profileHelper) { . $profileHelper }
-
 # --- Check elevation (CMD handles the actual elevation) ----
 $isAdmin = ([Security.Principal.WindowsPrincipal] [Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole(
     [Security.Principal.WindowsBuiltInRole]::Administrator)
@@ -473,22 +469,29 @@ Write-Host "Log file: $SetupLog" -ForegroundColor DarkGray
 Write-Host "  Per-package logs: $RunLogDir\packages\" -ForegroundColor DarkGray
 Write-Host ""
 
-# --- Publish the user's encrypted profile to git (best-effort) ---
-if ($env:SETUP_PROFILE_PATH -and (Get-Command Publish-ProfileStore -ErrorAction SilentlyContinue)) {
-    Write-Host "Saving your preferences to git (encrypted)..." -ForegroundColor Cyan
-    $pub = Publish-ProfileStore -ProfilePath $env:SETUP_PROFILE_PATH
-    if ($pub.Ok -and $pub.Reason -eq 'pushed') {
-        Write-Host "  Preferences synced to git." -ForegroundColor DarkGray
+# --- Publish the user's encrypted profile to git (offline mode, best-effort) ---
+if ($env:SETUP_PUBLISH_PROFILE -eq '1') {
+    $sharedRoot = Join-Path (Split-Path -Parent $ScriptDir) 'Shared'
+    if (-not (Test-Path $sharedRoot)) { $sharedRoot = Join-Path $ScriptDir 'Shared' }
+    $coreModule = Join-Path $sharedRoot 'Modules\SetupCore.psm1'
+    if (Test-Path $coreModule) {
+        Write-Host "Saving your preferences to git (encrypted)..." -ForegroundColor Cyan
+        try {
+            Import-Module $coreModule -Force
+            $pub = (New-ProfileManager -SharedRoot $sharedRoot).PublishIfLocal()
+            if ($pub.Ok -and $pub.Reason -eq 'pushed') {
+                Write-Host "  Preferences synced to git." -ForegroundColor DarkGray
+            }
+            elseif ($pub.Ok) {
+                Write-Host "  Preferences already up to date." -ForegroundColor DarkGray
+            }
+            else {
+                Write-Host "  Couldn't push preferences ($($pub.Reason)). Saved locally." -ForegroundColor Yellow
+            }
+        }
+        catch { Write-Warning "Could not publish preferences: $_" }
     }
-    elseif ($pub.Ok) {
-        Write-Host "  Preferences already up to date." -ForegroundColor DarkGray
-    }
-    else {
-        Write-Host "  Couldn't push preferences ($($pub.Reason)). Saved locally at:" -ForegroundColor Yellow
-        Write-Host "    $env:SETUP_PROFILE_PATH" -ForegroundColor DarkGray
-        Write-Host "  (Need push access -- fork the repo or run 'git push' yourself.)" -ForegroundColor DarkGray
-    }
-    Remove-Item Env:SETUP_PROFILE_PATH -ErrorAction SilentlyContinue
+    Remove-Item Env:SETUP_PUBLISH_PROFILE -ErrorAction SilentlyContinue
 }
 
 try { Stop-Transcript | Out-Null } catch { }

@@ -74,29 +74,73 @@ package and feature checkbox at once.
 
 ---
 
-## User Profiles (encrypted, git-synced)
+## Shared core (`Shared/`)
+
+Database settings and profile logic live outside `Windows/` so macOS uses the
+same implementation. Runs on Windows PowerShell 5.1 and pwsh 7+ (macOS/Linux).
+
+```
+Shared/
+  Config/supabase-config.json     <- connection settings (obfuscated)
+  Database/supabase-schema.sql    <- table + RLS policies
+  Modules/SetupCore.psm1          <- all classes
+  Protect-Config.ps1              <- regenerate the config
+  profiles/                       <- offline encrypted profiles
+```
+
+### Class design
+
+| Class | Responsibility |
+|-------|----------------|
+| `SetupCrypto` | AES-256-CBC + HMAC-SHA256 + PBKDF2 (static) |
+| `SetupPaths` | resolves shared folders on any OS |
+| `UserIdentity` | normalises email/mobile, derives the hashed key |
+| `ProfileData` | payload model + JSON mapping |
+| `SupabaseConfig` | loads/decrypts settings, rejects secret keys |
+| `SupabaseClient` | REST transport (auth + rows) |
+| `ProfileStore` | abstract contract |
+| `SupabaseProfileStore` / `LocalProfileStore` | the two backends |
+| `OtpService` / `OtpChallenge` | offline OTP delivery + verification |
+| `ProfileManager` | facade used by the installers |
+
+Callers use the `New-*` factory functions instead of `using module`, so the
+module loads from any path (including the extracted exe).
+
+```powershell
+Import-Module Shared\Modules\SetupCore.psm1
+$m = New-ProfileManager
+$m.BeginVerification('you@example.com')
+$m.CompleteVerification('123456')
+$m.SaveProfile($passphrase, (New-ProfileData -Packages @('Git.Git')))
+```
+
+Swapping backends means adding one `ProfileStore` subclass -- nothing else changes.
+
+---
+
+## User Profiles (encrypted, cross-platform)
 
 The first screen (`Show-ProfileLoginDialog` in `Setup-UI.ps1`) lets a user save
-their selections and restore them on any machine. Logic lives in
-`UserProfile.ps1` (crypto + local store), `SupabaseStore.ps1` (online store +
-server-side OTP) and `Otp.ps1` (offline OTP).
+their selections and restore them on any machine.
 
 There are two backends. Supabase is used automatically when configured;
-otherwise it falls back to encrypted JSON files synced through git.
+otherwise it falls back to encrypted files synced through git.
 
 | | Supabase (default) | Offline fallback |
 |---|---|---|
-| Storage | `public.user_profiles` table | `Windows\users\<hash>.json` |
+| Storage | `public.user_profiles` table | `Shared/profiles/<hash>.json` |
 | OTP | Supabase Auth, **verified server-side** | generated locally (bypassable) |
 | Sync | any user, any machine | needs git push access |
 | Delivery config | none -- built in | your SMTP/Twilio creds |
 
 ### Supabase setup (one-time)
 
-1. Run [`supabase-schema.sql`](supabase-schema.sql) in Dashboard -> SQL Editor.
-   It creates `user_profiles` and RLS policies scoped to `auth.uid()`.
-2. `supabase-config.json` holds the project URL + **publishable** key, stored
-   obfuscated. Regenerate it with `.\Protect-Config.ps1 -Url ... -PublishableKey ...`.
+1. Run [`supabase-schema.sql`](../Shared/Database/supabase-schema.sql) in
+   Dashboard -> SQL Editor. It creates `user_profiles` and RLS policies scoped
+   to `auth.uid()`.
+2. `Shared/Config/supabase-config.json` holds the project URL + **publishable**
+   key, stored obfuscated. Regenerate with
+   `pwsh ./Shared/Protect-Config.ps1 -Url ... -PublishableKey ...`.
    Override at runtime with `SETUP_SUPABASE_URL` / `SETUP_SUPABASE_KEY`.
 3. For volume, set a custom SMTP provider in Auth settings -- the built-in mailer
    is rate-limited to a few messages per hour.
@@ -159,7 +203,7 @@ git tag v1.0.1 && git push origin v1.0.1
 
 ### Offline OTP delivery (fallback only)
 Credentials come ONLY from env vars or a git-ignored
-`Windows\users\.otp-config.json` -- never hard-coded:
+`Shared/Config/.otp-config.json` -- never hard-coded:
 
 | Channel | Variables |
 |---------|-----------|

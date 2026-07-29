@@ -14,6 +14,12 @@ Windows/CodeSigning.cer
 Windows/users/.otp-config.json
 Windows/users/.otp-dev.txt
 
+# Supabase secret / service-role keys must never be committed.
+# Only supabase-config.json (URL + publishable key) is tracked.
+.env
+.env.local
+Windows/supabase-secret*.json
+
 # OS junk
 Thumbs.db
 Desktop.ini

@@ -29,6 +29,8 @@ $profileScript = Join-Path $PSScriptRoot 'UserProfile.ps1'
 if (Test-Path $profileScript) { . $profileScript }
 $otpScript = Join-Path $PSScriptRoot 'Otp.ps1'
 if (Test-Path $otpScript) { . $otpScript }
+$supabaseScript = Join-Path $PSScriptRoot 'SupabaseStore.ps1'
+if (Test-Path $supabaseScript) { . $supabaseScript }
 
 $script:ProfileLoaded     = $false
 $script:ProfileIdentifier = $null
@@ -39,11 +41,15 @@ $script:SavedFeatures     = $null
 $script:SavedShell        = $null
 $script:OtpChallenge      = $null
 $script:OtpVerified       = $false
+$script:UseSupabase       = $false
+$script:SupabaseToken     = $null
+$script:SupabaseUserId    = $null
 
 function Show-ProfileLoginDialog {
-    # Best-effort: pull the newest committed profiles so a returning user on a
-    # freshly cloned machine sees their latest saved selections.
-    if (Get-Command Sync-ProfileStore -ErrorAction SilentlyContinue) {
+    $script:UseSupabase = (Get-Command Test-SupabaseEnabled -ErrorAction SilentlyContinue) -and (Test-SupabaseEnabled)
+
+    # Offline mode syncs through git, so refresh the committed profiles first.
+    if (-not $script:UseSupabase -and (Get-Command Sync-ProfileStore -ErrorAction SilentlyContinue)) {
         try { Sync-ProfileStore | Out-Null } catch { }
     }
 
@@ -162,46 +168,83 @@ function Show-ProfileLoginDialog {
         }
 
         # New accounts must confirm the passphrase (typo protection).
-        $exists = $false
-        if (Get-Command Test-UserProfileExists -ErrorAction SilentlyContinue) {
-            $exists = Test-UserProfileExists -Identifier $idText
-        }
-        if (-not $exists -and ($tbPass.Text -ne $tbConfirm.Text)) {
-            $lblStatus.Text = "Passphrases don't match (new account)."; return
+        # In Supabase mode we can only tell after auth, so it's checked later.
+        if (-not $script:UseSupabase) {
+            $exists = $false
+            if (Get-Command Test-UserProfileExists -ErrorAction SilentlyContinue) {
+                $exists = Test-UserProfileExists -Identifier $idText
+            }
+            if (-not $exists -and ($tbPass.Text -ne $tbConfirm.Text)) {
+                $lblStatus.Text = "Passphrases don't match (new account)."; return
+            }
         }
 
         # --- OTP gate: prove the person controls this email / mobile ---
-        if (-not $script:OtpVerified -and (Get-Command New-OtpChallenge -ErrorAction SilentlyContinue)) {
-            if (-not $script:OtpChallenge) {
-                $chan = if ($idText -match '@') { 'email' } else { 'mobile' }
-                $norm = ConvertTo-ProfileKey $idText
-                $btnContinue.Enabled = $false
-                $lblStatus.ForeColor = [System.Drawing.Color]::FromArgb(170, 170, 170)
-                $lblStatus.Text = 'Sending verification code...'
-                $dlg.Refresh()
-                $script:OtpChallenge = New-OtpChallenge -Channel $chan -Target $norm.Value
-                $btnContinue.Enabled = $true
-                if (-not $script:OtpChallenge.Sent) {
-                    $errMsg = $script:OtpChallenge.Error
-                    $script:OtpChallenge = $null
-                    $lblStatus.ForeColor = [System.Drawing.Color]::FromArgb(255, 120, 120)
-                    $lblStatus.Text = "Couldn't send code: $errMsg. Configure SMTP/SMS or click Skip."
+        if (-not $script:OtpVerified) {
+            if ($script:UseSupabase) {
+                # Supabase Auth sends AND verifies the code server-side, so it
+                # can't be bypassed by tampering with this script.
+                if (-not $script:OtpChallenge) {
+                    $btnContinue.Enabled = $false
+                    $lblStatus.ForeColor = [System.Drawing.Color]::FromArgb(170, 170, 170)
+                    $lblStatus.Text = 'Sending verification code...'
+                    $dlg.Refresh()
+                    $send = Send-SupabaseOtp -Identifier $idText
+                    $btnContinue.Enabled = $true
+                    if (-not $send.Ok) {
+                        $lblStatus.ForeColor = [System.Drawing.Color]::FromArgb(255, 120, 120)
+                        $lblStatus.Text = "Couldn't send code: $($send.Error)"
+                        return
+                    }
+                    $script:OtpChallenge = @{ Supabase = $true }
+                    $lblOtp.Visible = $true
+                    $tbOtp.Visible = $true
+                    $tbOtp.Focus()
+                    $btnContinue.Text = 'Verify & continue'
+                    $lblStatus.ForeColor = [System.Drawing.Color]::FromArgb(120, 220, 120)
+                    $lblStatus.Text = "We sent a code to your $($send.Channel). Enter it above."
                     return
                 }
-                $lblOtp.Visible = $true
-                $tbOtp.Visible = $true
-                $tbOtp.Focus()
-                $btnContinue.Text = 'Verify & continue'
-                $lblStatus.ForeColor = [System.Drawing.Color]::FromArgb(120, 220, 120)
-                if ($script:OtpChallenge.Method -eq 'dev') {
-                    $lblStatus.Text = 'Dev mode: code printed to the console. Enter it above.'
+                $ver = Confirm-SupabaseOtp -Identifier $idText -Code $tbOtp.Text
+                if (-not $ver.Ok) {
+                    $lblStatus.ForeColor = [System.Drawing.Color]::FromArgb(255, 120, 120)
+                    $lblStatus.Text = "Code: $($ver.Error)"
+                    return
                 }
-                else {
-                    $lblStatus.Text = "We sent a code to your $chan. Enter it above."
-                }
-                return
+                $script:OtpVerified    = $true
+                $script:SupabaseToken  = $ver.AccessToken
+                $script:SupabaseUserId = $ver.UserId
             }
-            else {
+            elseif (Get-Command New-OtpChallenge -ErrorAction SilentlyContinue) {
+                if (-not $script:OtpChallenge) {
+                    $chan = if ($idText -match '@') { 'email' } else { 'mobile' }
+                    $norm = ConvertTo-ProfileKey $idText
+                    $btnContinue.Enabled = $false
+                    $lblStatus.ForeColor = [System.Drawing.Color]::FromArgb(170, 170, 170)
+                    $lblStatus.Text = 'Sending verification code...'
+                    $dlg.Refresh()
+                    $script:OtpChallenge = New-OtpChallenge -Channel $chan -Target $norm.Value
+                    $btnContinue.Enabled = $true
+                    if (-not $script:OtpChallenge.Sent) {
+                        $errMsg = $script:OtpChallenge.Error
+                        $script:OtpChallenge = $null
+                        $lblStatus.ForeColor = [System.Drawing.Color]::FromArgb(255, 120, 120)
+                        $lblStatus.Text = "Couldn't send code: $errMsg. Configure SMTP/SMS or click Skip."
+                        return
+                    }
+                    $lblOtp.Visible = $true
+                    $tbOtp.Visible = $true
+                    $tbOtp.Focus()
+                    $btnContinue.Text = 'Verify & continue'
+                    $lblStatus.ForeColor = [System.Drawing.Color]::FromArgb(120, 220, 120)
+                    if ($script:OtpChallenge.Method -eq 'dev') {
+                        $lblStatus.Text = 'Dev mode: code printed to the console. Enter it above.'
+                    }
+                    else {
+                        $lblStatus.Text = "We sent a code to your $chan. Enter it above."
+                    }
+                    return
+                }
                 $chk = Test-OtpResponse -Challenge $script:OtpChallenge -InputCode $tbOtp.Text
                 if (-not $chk.Ok) {
                     $lblStatus.ForeColor = [System.Drawing.Color]::FromArgb(255, 120, 120)
@@ -218,20 +261,45 @@ function Show-ProfileLoginDialog {
             }
         }
 
-        # --- Verified (or OTP unavailable): load or create the profile ---
-        $res = Read-UserProfile -Identifier $idText -Passphrase $passText
-        if ($res.Found -and $res.Decrypted) {
-            $script:ProfileLoaded = $true
-            $script:SavedPackages = @($res.Data.packages)
-            $script:SavedFeatures = @($res.Data.features)
-            $script:SavedShell    = [string]$res.Data.defaultShell
-            if (-not $tbName.Text -and $res.Data.name) { $script:ProfileName = [string]$res.Data.name }
+        # --- Verified: load the existing profile (if any) and decrypt it ---
+        if ($script:UseSupabase) {
+            $row = Get-SupabaseProfileRow -AccessToken $script:SupabaseToken -UserId $script:SupabaseUserId
+            if (-not $row.Ok) {
+                $lblStatus.Text = "Couldn't reach the database: $($row.Error)"; return
+            }
+            if ($row.Found) {
+                $plain = Unprotect-ProfilePayload -Record $row.Row -Passphrase $passText
+                if ($null -eq $plain) {
+                    $lblStatus.Text = 'Incorrect passphrase for this account.'; return
+                }
+                try { $data = $plain | ConvertFrom-Json } catch { $data = $null }
+                if ($data) {
+                    $script:ProfileLoaded = $true
+                    $script:SavedPackages = @($data.packages)
+                    $script:SavedFeatures = @($data.features)
+                    $script:SavedShell    = [string]$data.defaultShell
+                    if (-not $tbName.Text -and $data.name) { $script:ProfileName = [string]$data.name }
+                }
+            }
+            elseif ($tbPass.Text -ne $tbConfirm.Text) {
+                $lblStatus.Text = "Passphrases don't match (new account)."; return
+            }
         }
-        elseif ($res.Found -and $res.Error -eq 'corrupt') {
-            $lblStatus.Text = 'That profile file is corrupt and cannot be read.'; return
-        }
-        elseif ($res.Found) {
-            $lblStatus.Text = 'Incorrect passphrase for this account.'; return
+        else {
+            $res = Read-UserProfile -Identifier $idText -Passphrase $passText
+            if ($res.Found -and $res.Decrypted) {
+                $script:ProfileLoaded = $true
+                $script:SavedPackages = @($res.Data.packages)
+                $script:SavedFeatures = @($res.Data.features)
+                $script:SavedShell    = [string]$res.Data.defaultShell
+                if (-not $tbName.Text -and $res.Data.name) { $script:ProfileName = [string]$res.Data.name }
+            }
+            elseif ($res.Found -and $res.Error -eq 'corrupt') {
+                $lblStatus.Text = 'That profile file is corrupt and cannot be read.'; return
+            }
+            elseif ($res.Found) {
+                $lblStatus.Text = 'Incorrect passphrase for this account.'; return
+            }
         }
 
         $script:ProfileIdentifier = $idText
@@ -641,26 +709,45 @@ if ($result -eq [System.Windows.Forms.DialogResult]::OK) {
     if ($selectedFeats -match 'gitssh')   { $catIds += 13 }
     $env:SETUP_CATEGORIES = ($catIds | Sort-Object -Unique) -join ','
 
-    # --- Save this user's selections (encrypted) + tell Setup.ps1 to publish ---
-    if ($script:ProfileIdentifier -and $script:ProfilePassphrase -and
-        (Get-Command Write-UserProfile -ErrorAction SilentlyContinue)) {
-        try {
-            $profilePath = Write-UserProfile -Identifier $script:ProfileIdentifier `
-                -Passphrase $script:ProfilePassphrase -Data @{
-                    name         = $script:ProfileName
-                    packages     = ($allPkgCheckBoxes  | Where-Object { $_.Checked } | ForEach-Object { [string]$_.Tag })
-                    features     = ($allFeatCheckBoxes | Where-Object { $_.Checked } | ForEach-Object { [string]$_.Tag })
+    # --- Save this user's selections (encrypted) ---
+    if ($script:ProfileIdentifier -and $script:ProfilePassphrase) {
+        $selPkgList  = @($allPkgCheckBoxes  | Where-Object { $_.Checked } | ForEach-Object { [string]$_.Tag })
+        $selFeatList = @($allFeatCheckBoxes | Where-Object { $_.Checked } | ForEach-Object { [string]$_.Tag })
+
+        if ($script:UseSupabase -and $script:SupabaseToken) {
+            try {
+                $payload = @{
+                    schema = 1; name = $script:ProfileName
+                    packages = $selPkgList; features = $selFeatList
                     defaultShell = $shellChoice
-                }
-            $env:SETUP_PROFILE_PATH = $profilePath
-            if ($script:ProfileName) { $env:SETUP_USER_NAME = $script:ProfileName }
-            $norm = ConvertTo-ProfileKey $script:ProfileIdentifier
-            if ($norm.Type -eq 'email') { $env:SETUP_USER_EMAIL = $norm.Value }
-            Write-Host "Saved encrypted profile: $profilePath" -ForegroundColor DarkGray
+                    updatedAt = (Get-Date).ToString('o')
+                } | ConvertTo-Json -Depth 6 -Compress
+                $prot = Protect-ProfilePayload -PlainText $payload -Passphrase $script:ProfilePassphrase
+                $save = Save-SupabaseProfileRow -AccessToken $script:SupabaseToken `
+                    -UserId $script:SupabaseUserId -Protected $prot
+                if ($save.Ok) { Write-Host 'Preferences saved to your account (encrypted).' -ForegroundColor DarkGray }
+                else { Write-Warning "Could not save preferences: $($save.Error)" }
+            }
+            catch { Write-Warning "Could not save your profile: $_" }
         }
-        catch {
-            Write-Warning "Could not save your profile: $_"
+        elseif (Get-Command Write-UserProfile -ErrorAction SilentlyContinue) {
+            try {
+                $profilePath = Write-UserProfile -Identifier $script:ProfileIdentifier `
+                    -Passphrase $script:ProfilePassphrase -Data @{
+                        name         = $script:ProfileName
+                        packages     = $selPkgList
+                        features     = $selFeatList
+                        defaultShell = $shellChoice
+                    }
+                $env:SETUP_PROFILE_PATH = $profilePath
+                Write-Host "Saved encrypted profile: $profilePath" -ForegroundColor DarkGray
+            }
+            catch { Write-Warning "Could not save your profile: $_" }
         }
+
+        if ($script:ProfileName) { $env:SETUP_USER_NAME = $script:ProfileName }
+        $norm = ConvertTo-ProfileKey $script:ProfileIdentifier
+        if ($norm.Type -eq 'email') { $env:SETUP_USER_EMAIL = $norm.Value }
     }
 
     Write-Host "Packages:  $selectedPkgs"

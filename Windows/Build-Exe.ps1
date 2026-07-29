@@ -31,10 +31,10 @@ if (-not (Get-Command Invoke-ps2exe -ErrorAction SilentlyContinue)) {
 
 # --- Files to embed (ALL as base64 -- safe, no parse issues) ---
 $allFiles = @(
-    'Setup.ps1', 'Setup-UI.ps1', 'UserProfile.ps1', 'Otp.ps1',
+    'Setup.ps1', 'Setup-UI.ps1', 'UserProfile.ps1', 'Otp.ps1', 'SupabaseStore.ps1',
     'restore.ps1', 'Enable-WindowsFeatures.ps1',
     'bootstrap-dev.sh', 'Sign-Scripts.ps1', 'Setup.cmd',
-    'winget-packages.json', 'vscode-extensions.txt',
+    'winget-packages.json', 'supabase-config.json', 'vscode-extensions.txt',
     'zshrc-template', 'p10k-template', 'zsh-gitbash.tar.gz'
 )
 

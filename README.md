@@ -9,13 +9,17 @@
 Open **PowerShell as Administrator** and run:
 
 ```powershell
-irm https://raw.githubusercontent.com/sdeepanshu13/System-Setup/main/install.ps1 | iex
+powershell -ExecutionPolicy Bypass -Command "irm https://raw.githubusercontent.com/sdeepanshu13/System-Setup/main/install.ps1 | iex"
 ```
 
 That's it. It fetches the latest version and opens the setup wizard.
 
 **Recommended**, because it always gives you the newest fix and antivirus
 doesn't interfere with it.
+
+> `-ExecutionPolicy Bypass` applies to that one process only -- it doesn't
+> change any setting on your machine. Without it, Windows' default `Restricted`
+> policy blocks the setup script from running.
 
 ---
 

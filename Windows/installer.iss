@@ -1,18 +1,23 @@
-; Inno Setup script for System-Setup.
+; Inno Setup script for the System-Setup launcher.
 ;
-; Replaces the ps2exe build. A ps2exe binary decodes and executes an embedded
-; script at runtime, which Defender's ML scores as a dropper
-; (Trojan:Win32/Phonzy.B!ml). A conventional installer doesn't trip that.
+; This deliberately does NOT bundle the application. It ships only the small
+; bootstrap script, which fetches the current source at run time.
 ;
-; Nothing is left behind: files extract to {tmp}, the setup runs, and Windows
-; clears the folder on exit. No install directory, no uninstaller, no registry.
+; Why: Defender's cloud protection scores unsigned binaries largely on
+; reputation, and reputation is per file hash. Bundling the app meant every push
+; produced a brand-new binary with none, so downloads were quarantined
+; (Trojan:Win32/Wacatac, Phonzy - both ML heuristics).
 ;
-; Build:  iscc /DAppVersion=1.1.1 installer.iss
+; With the payload outside the binary, this file only changes when the bootstrap
+; logic changes. The hash stays put across app releases and can accumulate
+; trust, while users still get the newest code on every run.
+;
+; LauncherVersion is deliberately fixed and separate from the app version, so
+; routine releases don't perturb the binary.
+;
+; Build:  iscc installer.iss
 
-#ifndef AppVersion
-  #define AppVersion "1.0.0"
-#endif
-
+#define LauncherVersion "1.0.0"
 #define AppName "System-Setup"
 #define AppPublisher "sdeepanshu13"
 #define AppURL "https://github.com/sdeepanshu13/System-Setup"
@@ -20,13 +25,13 @@
 [Setup]
 AppId={{8F3C5A21-6D74-4B9E-A0C2-1E7B4D9F2A63}
 AppName={#AppName}
-AppVersion={#AppVersion}
-AppVerName={#AppName} {#AppVersion}
+AppVersion={#LauncherVersion}
+AppVerName={#AppName}
 AppPublisher={#AppPublisher}
 AppPublisherURL={#AppURL}
 AppSupportURL={#AppURL}/issues
-VersionInfoVersion={#AppVersion}
-VersionInfoDescription=Windows dev machine setup - backup and restore
+VersionInfoVersion={#LauncherVersion}
+VersionInfoDescription=System-Setup launcher
 VersionInfoCompany={#AppPublisher}
 VersionInfoProductName={#AppName}
 
@@ -50,26 +55,11 @@ MinVersion=10.0
 Name: "english"; MessagesFile: "compiler:Default.isl"
 
 [Files]
-; deleteafterinstall keeps nothing on disk once the run finishes.
-Source: "Setup.ps1";                  DestDir: "{tmp}"; Flags: deleteafterinstall
-Source: "Setup-UI.ps1";               DestDir: "{tmp}"; Flags: deleteafterinstall
-Source: "Setup-Wizard.ps1";           DestDir: "{tmp}"; Flags: deleteafterinstall
-Source: "Setup-Flows.ps1";            DestDir: "{tmp}"; Flags: deleteafterinstall
-Source: "restore.ps1";                DestDir: "{tmp}"; Flags: deleteafterinstall
-Source: "Enable-WindowsFeatures.ps1"; DestDir: "{tmp}"; Flags: deleteafterinstall
-Source: "bootstrap-dev.sh";           DestDir: "{tmp}"; Flags: deleteafterinstall
-Source: "winget-packages.json";       DestDir: "{tmp}"; Flags: deleteafterinstall
-Source: "vscode-extensions.txt";      DestDir: "{tmp}"; Flags: deleteafterinstall
-Source: "zshrc-template";             DestDir: "{tmp}"; Flags: deleteafterinstall
-Source: "p10k-template";              DestDir: "{tmp}"; Flags: deleteafterinstall
-Source: "zsh-gitbash.tar.gz";         DestDir: "{tmp}"; Flags: deleteafterinstall skipifsourcedoesntexist
-Source: "..\Shared\Modules\SetupCore.psm1";      DestDir: "{tmp}\Shared\Modules"; Flags: deleteafterinstall
-Source: "..\Shared\Modules\SetupInventory.psm1"; DestDir: "{tmp}\Shared\Modules"; Flags: deleteafterinstall
-Source: "..\Shared\Config\supabase-config.json"; DestDir: "{tmp}\Shared\Config";  Flags: deleteafterinstall
+Source: "..\install.ps1"; DestDir: "{tmp}"; Flags: deleteafterinstall
 
 [Run]
 Filename: "powershell.exe"; \
-  Parameters: "-NoProfile -ExecutionPolicy Bypass -File ""{tmp}\Setup.ps1"""; \
+  Parameters: "-NoProfile -ExecutionPolicy Bypass -File ""{tmp}\install.ps1"""; \
   WorkingDir: "{tmp}"; \
-  StatusMsg: "Starting System-Setup..."; \
+  StatusMsg: "Fetching the latest version..."; \
   Flags: waituntilterminated

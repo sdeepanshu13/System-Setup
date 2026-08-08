@@ -1,16 +1,19 @@
 <#
 .SYNOPSIS
-    Builds Setup.exe with Inno Setup.
+    Builds the System-Setup launcher with Inno Setup.
 .DESCRIPTION
-    Replaces the ps2exe build. ps2exe produces a binary that decodes and runs an
-    embedded script at runtime, which Windows Defender's ML classifier scores as
-    a dropper (Trojan:Win32/Phonzy.B!ml) and quarantines. A conventional
-    installer isn't treated that way.
+    The launcher is a thin bootstrapper: it carries install.ps1 only and fetches
+    the application at run time.
 
-    Finds ISCC.exe, or installs Inno Setup via winget/choco if it's missing.
-    Signs the result when a certificate is available.
-.PARAMETER Version
-    Version stamped into the installer. Defaults to the newest git tag.
+    That matters for antivirus. Defender's cloud protection scores unsigned
+    binaries mostly on reputation, which is tracked per file hash. While the app
+    was bundled, every push produced a new binary with no reputation and
+    downloads were quarantined. Keeping the payload outside means the hash only
+    moves when the bootstrap logic does, so it can accumulate trust -- and users
+    still get the latest code because it's fetched on each run.
+
+    The launcher version is therefore pinned in installer.iss and is NOT the app
+    version. -Version is accepted for compatibility but ignored.
 #>
 param(
     [string]$Version
@@ -21,19 +24,10 @@ $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Definition
 $DistDir = Join-Path (Split-Path $ScriptDir) 'dist'
 $Iss = Join-Path $ScriptDir 'installer.iss'
 
-if (-not $Version) {
-    try {
-        $tag = (& git -C $ScriptDir describe --tags --abbrev=0 2>$null)
-        if ($tag) { $Version = ($tag -replace '^v', '') }
-    }
-    catch { }
-    if (-not $Version) { $Version = '1.0.0' }
+if ($Version) {
+    Write-Host "  (ignoring -Version '$Version': the launcher version is pinned so its hash stays stable)" -ForegroundColor DarkGray
 }
-# Inno wants a numeric a.b.c version string.
-if ($Version -notmatch '^\d+\.\d+\.\d+$') { $Version = ($Version -replace '[^\d.]', ''); }
-if ($Version -notmatch '^\d+\.\d+\.\d+$') { $Version = '1.0.0' }
-
-Write-Host "Building System-Setup $Version..." -ForegroundColor Cyan
+Write-Host 'Building System-Setup launcher...' -ForegroundColor Cyan
 
 function Get-Iscc {
     $cmd = Get-Command iscc.exe -ErrorAction SilentlyContinue
@@ -69,7 +63,7 @@ Write-Host "  Using: $iscc" -ForegroundColor DarkGray
 
 if (-not (Test-Path $DistDir)) { New-Item -ItemType Directory -Path $DistDir -Force | Out-Null }
 
-& $iscc "/DAppVersion=$Version" $Iss
+& $iscc $Iss
 if ($LASTEXITCODE -ne 0) {
     Write-Error "Inno Setup failed with exit code $LASTEXITCODE"
     exit 1

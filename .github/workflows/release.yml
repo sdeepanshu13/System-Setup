@@ -59,14 +59,40 @@ jobs:
           echo "tag=$TAG" >> "$GITHUB_OUTPUT"
           echo "Releasing $TAG"
 
-      - name: Build Setup.exe (Inno Setup)
+      - name: Did the launcher itself change?
+        id: launcher
+        shell: bash
+        run: |
+          set -euo pipefail
+          # The launcher is a bootstrapper: it fetches the app at run time, so it
+          # only needs rebuilding when its own source changes. Rebuilding every
+          # push would churn the file hash, and Defender scores unsigned
+          # binaries on per-hash reputation -- which is what got downloads
+          # quarantined in the first place.
+          if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
+            CHANGED=yes
+          elif git rev-parse HEAD~1 >/dev/null 2>&1 &&
+               git diff --name-only HEAD~1 HEAD | grep -qE '^(install\.ps1|Windows/installer\.iss|Windows/Build-Installer\.ps1)$'; then
+            CHANGED=yes
+          elif ! gh release view launcher --json assets --jq '.assets[].name' 2>/dev/null | grep -q Setup.exe; then
+            CHANGED=yes   # no launcher published yet
+          else
+            CHANGED=no
+          fi
+          echo "changed=$CHANGED" >> "$GITHUB_OUTPUT"
+          echo "launcher rebuild needed: $CHANGED"
+        env:
+          GH_TOKEN: ${{ github.token }}
+
+      - name: Build launcher (Inno Setup)
+        if: steps.launcher.outputs.changed == 'yes'
         shell: powershell
         working-directory: Windows
-        run: .\Build-Installer.ps1 -Version '${{ steps.ver.outputs.tag }}'
+        run: .\Build-Installer.ps1
 
       # Runs only when the signing secrets exist, so forks build fine unsigned.
       - name: Sign Setup.exe
-        if: ${{ env.CODE_SIGN_PFX_BASE64 != '' }}
+        if: ${{ steps.launcher.outputs.changed == 'yes' && env.CODE_SIGN_PFX_BASE64 != '' }}
         shell: powershell
         working-directory: Windows
         env:
@@ -75,6 +101,7 @@ jobs:
         run: .\Sign-Exe.ps1
 
       - name: Report signature status
+        if: steps.launcher.outputs.changed == 'yes'
         shell: powershell
         run: |
           $sig = Get-AuthenticodeSignature "$PWD\dist\Setup.exe"
@@ -83,6 +110,7 @@ jobs:
           else { Write-Host '::warning::Artifact is unsigned - users will see a SmartScreen prompt.' }
 
       - name: Verify no secret keys were embedded
+        if: steps.launcher.outputs.changed == 'yes'
         shell: powershell
         run: |
           # Read as bytes: Select-String can't scan binaries reliably.
@@ -104,6 +132,7 @@ jobs:
       # Lets users confirm the download matches what CI built. Doesn't remove the
       # SmartScreen prompt -- only a CA certificate does that.
       - name: Generate checksum
+        if: steps.launcher.outputs.changed == 'yes'
         shell: powershell
         run: |
           Push-Location dist
@@ -112,10 +141,23 @@ jobs:
           Get-Content SHA256SUMS.txt
           Pop-Location
 
-      - uses: actions/upload-artifact@v4
+      # The launcher lives on its own fixed tag so its download URL never
+      # changes and its reputation isn't reset by app releases.
+      - name: Publish launcher
+        if: steps.launcher.outputs.changed == 'yes'
+        uses: softprops/action-gh-release@v2
         with:
-          name: Setup.exe
-          path: dist/Setup.exe
+          tag_name: launcher
+          name: Launcher
+          body: |
+            Bootstrapper for System-Setup. It fetches the current version at run
+            time, so this file rarely changes and you always get the newest app.
+
+            Download: https://github.com/${{ github.repository }}/releases/download/launcher/Setup.exe
+          files: |
+            dist/Setup.exe
+            dist/SHA256SUMS.txt
+          make_latest: "false"
 
       - name: Tag this build
         shell: bash
@@ -135,36 +177,17 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ steps.ver.outputs.tag }}
-          files: |
-            dist/Setup.exe
-            dist/SHA256SUMS.txt
           generate_release_notes: true
           make_latest: "true"
 
-      # GitHub's /releases/latest/download/ redirect has served a stale asset
-      # before, so the README points at the exact version and is refreshed here.
-      - name: Point README at this release
+      # The README points at the launcher's fixed URL, so it needs no rewriting
+      # per release -- the launcher always pulls the newest code itself.
+      - name: Confirm README points at the launcher
         shell: bash
         run: |
           set -euo pipefail
-          TAG="${{ steps.ver.outputs.tag }}"
-          SIZE=$(stat -c%s dist/Setup.exe)
-          PRETTY=$(printf "%'d" "$SIZE")
-          MB=$(awk "BEGIN{printf \"%.1f\", ${SIZE}/1048576}")
-
-          git checkout main --quiet
-          git pull --ff-only --quiet origin main || true
-
-          sed -i -E "s#releases/download/v[0-9]+(\.[0-9]+)+/Setup\.exe#releases/download/${TAG}/Setup.exe#g" README.md
-          sed -i -E "s#Download Setup\.exe \(v[0-9]+(\.[0-9]+)+\)#Download Setup.exe (${TAG})#g" README.md
-          sed -i -E "s#\*\*~[0-9.]+ MB \([0-9,]+ bytes\)\*\*#**~${MB} MB (${PRETTY} bytes)**#g" README.md
-
-          if git diff --quiet README.md; then
-            echo "README already current."
+          if grep -q 'releases/download/launcher/Setup.exe' README.md; then
+            echo "README points at the launcher URL."
           else
-            git config user.name  "github-actions[bot]"
-            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-            git commit -qm "README: point download at ${TAG} [skip ci]" README.md
-            git push origin main
-            echo "README updated to ${TAG}."
+            echo "::warning::README does not reference the launcher download URL."
           fi

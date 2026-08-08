@@ -25,25 +25,21 @@ doesn't interfere with it.
 
 ## Or download the installer
 
-**[Download Setup.exe (v1.1.6)](https://github.com/sdeepanshu13/System-Setup/releases/download/v1.1.6/Setup.exe)**
+**[Download Setup.exe](https://github.com/sdeepanshu13/System-Setup/releases/download/launcher/Setup.exe)**
 
-> **Heads-up:** Windows Defender often **deletes this file on download**,
-> reporting `Trojan:Win32/Wacatac`. It's a false positive, but it's persistent.
->
-> The installer inventories your installed software, encrypts it and uploads it
-> so you can restore it elsewhere. That sequence matches the pattern of
-> data-stealing malware, and an unsigned download has no reputation to offset
-> it. Only a code-signing certificate fixes it properly.
->
-> **Use the PowerShell command above instead** -- same app, no interference.
+This link never changes, and it always installs the **latest** version -- the
+download is a small launcher that fetches the current release when you run it.
+So there's no "old build" to worry about, and no need to re-download after a fix.
 
-*Other versions: [all releases](https://github.com/sdeepanshu13/System-Setup/releases).*
+> **If Windows Defender deletes it:** use the PowerShell command above instead.
+> Unsigned downloads are judged largely on how many people have run that exact
+> file before, so a fresh one can be quarantined
+> (`Trojan:Win32/Wacatac` -- a false positive). Because the launcher rarely
+> changes, this should settle down over time. A code-signing certificate is the
+> permanent fix.
 
-> **Check you got the right file.** It should be **~4.1 MB (4299447 bytes)**.
-> If yours is smaller, it's an older build -- delete it and download again.
-> ```powershell
-> (Get-Item "$env:USERPROFILE\Downloads\Setup.exe").Length
-> ```
+*All versions: [releases](https://github.com/sdeepanshu13/System-Setup/releases).
+Checksum: `SHA256SUMS.txt` on the [launcher release](https://github.com/sdeepanshu13/System-Setup/releases/tag/launcher).*
 
 ---
 

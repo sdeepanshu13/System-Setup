@@ -410,10 +410,12 @@ Findings from testing:
 | ps2exe vs Inno Setup | **both flagged** -- packaging isn't the cause |
 
 Only **code signing** reliably fixes this; see [code signing](#code-signing).
-Releases are cut from tags rather than every push so a build isn't perpetually
-brand new, which is what these classifiers penalise most.
 
 Running from a clone (`Windows\Setup.cmd`) avoids the issue entirely.
+
+Note that releasing on every push means each build is a file Defender has never
+seen, so reputation never accumulates. That's a deliberate trade for always
+having the newest build published.
 
 ---
 

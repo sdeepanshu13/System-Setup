@@ -1,19 +1,18 @@
 name: Build & Release Setup.exe
 
-# Releases are cut from tags, not from every push:
+# Every push to main cuts a new patch release and repoints the README download
+# link. Tagging manually still works and uses that tag's version.
 #
-#   git tag v1.2.0 && git push origin v1.2.0
-#
-# Defender's ML flags brand-new unsigned binaries, and a release per push meant
-# every download was a never-before-seen file that could never build reputation.
-# Fewer, longer-lived builds get flagged less. workflow_dispatch auto-increments
-# the patch version if you'd rather not pick one.
+# Trade-off worth knowing: each release is a binary Defender has never seen, so
+# it can't accumulate reputation and unsigned downloads keep getting flagged.
+# Code signing is what fixes that -- see Windows/README.md#code-signing.
 #
 # Loop guard: this workflow pushes a README commit itself. That commit carries
 # [skip ci] and the job also ignores the bot actor, so it can't retrigger
 # endlessly.
 on:
   push:
+    branches: [main]
     tags: ["v*"]
   workflow_dispatch:
 

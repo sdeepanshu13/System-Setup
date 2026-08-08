@@ -25,7 +25,7 @@ doesn't interfere with it.
 
 ## Or download the installer
 
-**[Download Setup.exe (v1.1.5)](https://github.com/sdeepanshu13/System-Setup/releases/download/v1.1.5/Setup.exe)**
+**[Download Setup.exe (v1.1.6)](https://github.com/sdeepanshu13/System-Setup/releases/download/v1.1.6/Setup.exe)**
 
 > **Heads-up:** Windows Defender often **deletes this file on download**,
 > reporting `Trojan:Win32/Wacatac`. It's a false positive, but it's persistent.
@@ -39,7 +39,7 @@ doesn't interfere with it.
 
 *Other versions: [all releases](https://github.com/sdeepanshu13/System-Setup/releases).*
 
-> **Check you got the right file.** It should be **~4.1 MB (4299443 bytes)**.
+> **Check you got the right file.** It should be **~4.1 MB (4299447 bytes)**.
 > If yours is smaller, it's an older build -- delete it and download again.
 > ```powershell
 > (Get-Item "$env:USERPROFILE\Downloads\Setup.exe").Length

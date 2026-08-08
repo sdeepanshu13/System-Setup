@@ -815,7 +815,12 @@ class ProfileManager {
         $this.Paths = [SetupPaths]::new($sharedRoot)
         $this.Config = [SupabaseConfig]::Load($this.Paths.ConfigFile())
         $this.Errors = [ErrorReporter]::new($this.Config)
-        if ($this.Config.IsEnabled()) {
+
+        # Escape hatch for offline machines, air-gapped installs and testing
+        # without burning the email quota.
+        $forceOffline = [Environment]::GetEnvironmentVariable('SETUP_FORCE_OFFLINE') -eq '1'
+
+        if ($this.Config.IsEnabled() -and -not $forceOffline) {
             $this.Client = [SupabaseClient]::new($this.Config)
             $this.Store = [SupabaseProfileStore]::new($this.Client)
         }

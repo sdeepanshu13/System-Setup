@@ -413,9 +413,10 @@ Only **code signing** reliably fixes this; see [code signing](#code-signing).
 
 Running from a clone (`Windows\Setup.cmd`) avoids the issue entirely.
 
-Note that releasing on every push means each build is a file Defender has never
-seen, so reputation never accumulates. That's a deliberate trade for always
-having the newest build published.
+Every push to main publishes a release, so the README always points at the
+newest build. The cost is that each download is a file Defender has never seen,
+so reputation never accumulates -- a deliberate trade for always shipping the
+latest fix.
 
 ---
 

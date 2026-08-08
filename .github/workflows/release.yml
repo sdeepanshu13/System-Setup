@@ -1,11 +1,11 @@
 name: Build & Release Setup.exe
 
-# Every push to main cuts a new patch release and repoints the README download
-# link. Tagging manually still works and uses that tag's version.
+# Every push to main cuts a new release and repoints the README, so the
+# documented download is always the newest commit's build.
 #
-# Trade-off worth knowing: each release is a binary Defender has never seen, so
-# it can't accumulate reputation and unsigned downloads keep getting flagged.
-# Code signing is what fixes that -- see Windows/README.md#code-signing.
+# Trade-off: each release is a brand-new binary with no reputation, which is
+# what Defender's ML penalises. Code signing is what fixes that -- see
+# Windows/README.md#code-signing.
 #
 # Loop guard: this workflow pushes a README commit itself. That commit carries
 # [skip ci] and the job also ignores the bot actor, so it can't retrigger

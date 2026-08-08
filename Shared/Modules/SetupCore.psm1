@@ -248,17 +248,21 @@ class ProfileData {
     [string[]] $Packages = @()
     [string[]] $Features = @()
     [string] $DefaultShell = '1'
+    [object[]] $Apps = @()    # backed-up inventory: name/id/version/source
+    [object[]] $Repos = @()   # name/path/remote/branch
     [string] $UpdatedAt = ''
 
     [string] ToJson() {
         return (@{
-                schema       = 1
+                schema       = 2
                 name         = $this.Name
                 packages     = @($this.Packages)
                 features     = @($this.Features)
                 defaultShell = $this.DefaultShell
+                apps         = @($this.Apps)
+                repos        = @($this.Repos)
                 updatedAt    = (Get-Date).ToString('o')
-            } | ConvertTo-Json -Depth 6 -Compress)
+            } | ConvertTo-Json -Depth 8 -Compress)
     }
 
     static [ProfileData] FromJson([string]$json) {
@@ -274,6 +278,8 @@ class ProfileData {
         }
         if ($o.PSObject.Properties.Name -contains 'packages' -and $o.packages) { $p.Packages = @($o.packages) }
         if ($o.PSObject.Properties.Name -contains 'features' -and $o.features) { $p.Features = @($o.features) }
+        if ($o.PSObject.Properties.Name -contains 'apps' -and $o.apps) { $p.Apps = @($o.apps) }
+        if ($o.PSObject.Properties.Name -contains 'repos' -and $o.repos) { $p.Repos = @($o.repos) }
         return $p
     }
 }
@@ -707,6 +713,89 @@ class OtpService {
 }
 
 # =====================================================================
+# Error reporting
+# =====================================================================
+
+class ErrorReporter {
+    [SupabaseConfig] $Config
+    [string] $Platform
+    [string] $OsVersion
+    [string] $UserId
+    [bool]   $Enabled = $true
+    hidden [System.Collections.Generic.List[hashtable]] $Pending
+
+    ErrorReporter([SupabaseConfig]$config) {
+        $this.Config = $config
+        $this.Pending = [System.Collections.Generic.List[hashtable]]::new()
+        $this.Platform = if ($script:OnWindows) { 'windows' } else { 'macos' }
+        try { $this.OsVersion = [System.Runtime.InteropServices.RuntimeInformation]::OSDescription.Trim() }
+        catch { $this.OsVersion = 'unknown' }
+    }
+
+    # Never let telemetry break an install: failures are swallowed and queued.
+    [void] Report([string]$phase, [string]$package, [string]$message, [string]$detail) {
+        if (-not $this.Enabled -or [string]::IsNullOrWhiteSpace($message)) { return }
+
+        $row = @{
+            platform   = $this.Platform
+            phase      = $phase
+            package    = $package
+            message    = $this.Truncate($message, 1000)
+            detail     = $this.Truncate($detail, 4000)
+            os_version = $this.OsVersion
+        }
+        if ($this.UserId) { $row['user_id'] = $this.UserId }
+
+        if (-not $this.Config -or -not $this.Config.IsEnabled()) { $this.Pending.Add($row); return }
+        try {
+            Invoke-RestMethod -Method Post -Uri "$($this.Config.Url)/rest/v1/setup_errors" `
+                -Headers @{
+                apikey         = $this.Config.Key
+                'Content-Type' = 'application/json'
+                Prefer         = 'return=minimal'
+            } -Body ($row | ConvertTo-Json) -TimeoutSec 15 | Out-Null
+        }
+        catch { $this.Pending.Add($row) }
+    }
+
+    [void] ReportException([string]$phase, [string]$package, $errorRecord) {
+        $msg = ''; $detail = ''
+        try { $msg = $errorRecord.Exception.Message } catch { $msg = [string]$errorRecord }
+        try { $detail = $errorRecord.ScriptStackTrace } catch { }
+        $this.Report($phase, $package, $msg, $detail)
+    }
+
+    hidden [string] Truncate([string]$text, [int]$max) {
+        if ([string]::IsNullOrEmpty($text)) { return '' }
+        if ($text.Length -le $max) { return $text }
+        return $text.Substring(0, $max)
+    }
+
+    [int] PendingCount() { return $this.Pending.Count }
+
+    # Retry anything queued while the network or auth was unavailable.
+    [int] Flush() {
+        if ($this.Pending.Count -eq 0) { return 0 }
+        if (-not $this.Config -or -not $this.Config.IsEnabled()) { return 0 }
+        $sent = 0
+        foreach ($row in @($this.Pending)) {
+            try {
+                Invoke-RestMethod -Method Post -Uri "$($this.Config.Url)/rest/v1/setup_errors" `
+                    -Headers @{
+                    apikey         = $this.Config.Key
+                    'Content-Type' = 'application/json'
+                    Prefer         = 'return=minimal'
+                } -Body ($row | ConvertTo-Json) -TimeoutSec 15 | Out-Null
+                [void]$this.Pending.Remove($row)
+                $sent++
+            }
+            catch { break }
+        }
+        return $sent
+    }
+}
+
+# =====================================================================
 # Facade
 # =====================================================================
 
@@ -716,6 +805,7 @@ class ProfileManager {
     [SupabaseClient] $Client
     [ProfileStore] $Store
     [OtpService] $Otp
+    [ErrorReporter] $Errors
     [UserIdentity] $Identity
     [OtpChallenge] $Challenge
     [bool] $Verified = $false
@@ -724,6 +814,7 @@ class ProfileManager {
     ProfileManager([string]$sharedRoot) {
         $this.Paths = [SetupPaths]::new($sharedRoot)
         $this.Config = [SupabaseConfig]::Load($this.Paths.ConfigFile())
+        $this.Errors = [ErrorReporter]::new($this.Config)
         if ($this.Config.IsEnabled()) {
             $this.Client = [SupabaseClient]::new($this.Config)
             $this.Store = [SupabaseProfileStore]::new($this.Client)
@@ -758,7 +849,7 @@ class ProfileManager {
     [hashtable] CompleteVerification([string]$code) {
         if ($this.IsOnline()) {
             $r = $this.Client.VerifyOtp($this.Identity, $code)
-            if ($r.Ok) { $this.Verified = $true }
+            if ($r.Ok) { $this.Verified = $true; $this.Errors.UserId = $this.Client.UserId }
             return @{ Ok = $r.Ok; Reason = $(if ($r.ContainsKey('Error')) { $r.Error } else { '' }) }
         }
         $r = $this.Otp.Verify($this.Challenge, $code)
@@ -805,10 +896,13 @@ function New-ProfileData {
         [string]$Name = '',
         [string[]]$Packages = @(),
         [string[]]$Features = @(),
-        [string]$DefaultShell = '1'
+        [string]$DefaultShell = '1',
+        [object[]]$Apps = @(),
+        [object[]]$Repos = @()
     )
     $p = [ProfileData]::new()
     $p.Name = $Name; $p.Packages = $Packages; $p.Features = $Features; $p.DefaultShell = $DefaultShell
+    $p.Apps = $Apps; $p.Repos = $Repos
     return $p
 }
 
@@ -822,5 +916,10 @@ function Get-SetupPaths {
     return [SetupPaths]::new($SharedRoot)
 }
 
+function New-ErrorReporter {
+    param([string]$SharedRoot = (Get-SetupSharedRoot))
+    return [ErrorReporter]::new([SupabaseConfig]::Load(([SetupPaths]::new($SharedRoot)).ConfigFile()))
+}
+
 Export-ModuleMember -Function New-ProfileManager, New-ProfileData, New-SupabaseConfigContent,
-Get-SetupPaths, Get-SetupSharedRoot
+Get-SetupPaths, Get-SetupSharedRoot, New-ErrorReporter

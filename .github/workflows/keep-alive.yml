@@ -1,0 +1,48 @@
+name: Keep Supabase Awake
+
+# Free-tier Supabase pauses a project after ~7 days without activity, which
+# would leave the installer unable to sync. A cheap scheduled request counts as
+# activity and keeps the project live.
+#
+# NOTE: GitHub disables scheduled workflows after 60 days with no repo activity.
+# Re-enable it from the Actions tab if the repo ever goes quiet that long.
+on:
+  schedule:
+    - cron: "0 6 */2 * *" # every 2 days at 06:00 UTC
+  workflow_dispatch:
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Read Supabase settings
+        id: cfg
+        shell: pwsh
+        run: |
+          Import-Module ./Shared/Modules/SetupCore.psm1 -Force
+          $m = New-ProfileManager -SharedRoot (Resolve-Path ./Shared).Path
+          if (-not $m.Config.IsEnabled()) { throw 'Supabase config missing or unreadable.' }
+          "url=$($m.Config.Url)"  | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+          "key=$($m.Config.Key)"  | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+
+      - name: Ping REST + Auth
+        shell: bash
+        env:
+          URL: ${{ steps.cfg.outputs.url }}
+          KEY: ${{ steps.cfg.outputs.key }}
+        run: |
+          set -euo pipefail
+          # Retry so a project still waking up doesn't fail the run.
+          code=$(curl -sS -o /dev/null -w '%{http_code}' \
+            --retry 6 --retry-delay 15 --retry-all-errors --max-time 45 \
+            -H "apikey: $KEY" \
+            "$URL/rest/v1/user_profiles?select=user_id&limit=1")
+          echo "REST -> HTTP $code"
+          # 200 = reachable. 4xx still proves the project is awake; 5xx does not.
+          if [ "$code" -ge 500 ] || [ "$code" = "000" ]; then
+            echo "::error::Supabase appears to be down or paused (HTTP $code)"
+            exit 1
+          fi
+          echo "Project is awake."

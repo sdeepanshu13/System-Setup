@@ -38,3 +38,42 @@ drop policy if exists "own profile delete" on public.user_profiles;
 create policy "own profile delete" on public.user_profiles
     for delete to authenticated
     using ((select auth.uid()) = user_id);
+
+
+-- ---------------------------------------------------------------------------
+-- Error reporting
+-- ---------------------------------------------------------------------------
+-- Install failures are pushed here so they can be reviewed and fixed centrally.
+--
+-- Access model is deliberately asymmetric: clients may INSERT but never SELECT.
+-- If users could read this table they'd see other people's machine names and
+-- paths. Only the project owner reads it -- from the dashboard or with the
+-- secret key from a trusted machine (never from the shipped app).
+
+create table if not exists public.setup_errors (
+    id          bigint generated always as identity primary key,
+    user_id     uuid references auth.users (id) on delete set null,
+    platform    text        not null default 'unknown',   -- windows | macos
+    phase       text        not null default 'unknown',   -- packages | bootstrap | profile | ui
+    package     text,                                     -- failing package, when applicable
+    message     text        not null,
+    detail      text,                                     -- exit code, stack, log excerpt
+    app_version text,
+    os_version  text,
+    resolved    boolean     not null default false,
+    created_at  timestamptz not null default now()
+);
+
+create index if not exists setup_errors_unresolved_idx
+    on public.setup_errors (created_at desc) where not resolved;
+
+alter table public.setup_errors enable row level security;
+
+-- Anyone running the installer may report a failure, signed in or not.
+drop policy if exists "anyone can report an error" on public.setup_errors;
+create policy "anyone can report an error" on public.setup_errors
+    for insert to anon, authenticated
+    with check (true);
+
+-- No select/update/delete policies: only the service role (owner) can read,
+-- triage and clear these rows.

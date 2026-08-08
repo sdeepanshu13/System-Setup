@@ -139,7 +139,9 @@ Each is a separate checkbox:
 | WSL not working | Reboot first. It needs a restart. |
 | Need to change what's installed | Run Setup.exe again. Uncheck what you don't want. |
 | Forgot my passphrase | There's no recovery -- the passphrase *is* the encryption key. Click **Skip**, or start fresh with a new passphrase. |
-| "Couldn't send code" | Email/SMS delivery isn't configured. Click **Skip** to continue, or see [Windows/README.md](Windows/README.md#user-profiles-encrypted-git-synced). |
+| "Couldn't send code" | Email delivery isn't configured. Click **Skip** to continue, or see [Windows/README.md](Windows/README.md#user-profiles-encrypted-cross-platform). |
+| An app didn't come back | Only apps with a known package id can be reinstalled. Others are listed in your backup for reference. |
+| A repo didn't clone | Repos without a remote are skipped -- there's nothing to clone from. |
 
 ---
 

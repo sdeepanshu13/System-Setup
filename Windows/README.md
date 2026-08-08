@@ -12,33 +12,76 @@ User double-clicks Setup.exe (or Setup.cmd)
   +--> Auto-elevates to Administrator
   +--> Starts logging (setup.log)
   |
-  +--> Setup-UI.ps1 (GUI)
+  +--> Setup-Wizard.ps1  -- "which machine is this?"
   |      |
-  |      +--> Profile login: email/mobile + passphrase + OTP verify (optional)
-  |      +--> Loads saved selections (encrypted) if that profile exists
-  |      +--> Returns: selected winget package IDs
-  |      +--> Returns: selected feature flags
-  |      +--> Returns: default terminal choice (1-5)
+  |      +-- OLD machine  --> Setup-Flows.ps1 :: Invoke-BackupFlow
+  |      |     +--> InventoryScanner: installed apps (games filtered out)
+  |      |     +--> repo folder picker (several locations)
+  |      |     +--> review checklist (Select All / Deselect All)
+  |      |     +--> sign in: email -> OTP -> passphrase
+  |      |     +--> encrypted save, then exit
+  |      |
+  |      +-- NEW machine  --> Setup-Flows.ps1 :: Invoke-RestoreFlow
+  |      |     +--> sign in: email -> OTP -> passphrase
+  |      |     +--> review what's stored (apps / settings / repos)
+  |      |     +--> feeds SETUP_SELECTED_PACKAGES + SETUP_FEATURES
+  |      |
+  |      +-- Fresh setup --> Setup-UI.ps1 (standard catalogue)
   |
-  +--> Phase 1: restore.ps1
-  |      +--> winget source reset + update (120s timeout)
-  |      +--> Skip already-installed packages
-  |      +--> Priority installs: Git, Terminal, PS7, gh (sequential)
-  |      +--> Everything else in parallel (throttle 5)
-  |      +--> Per-package logs in packages/*.log
-  |
+  +--> Phase 1: restore.ps1        (winget, per-package logs)
   +--> Phase 1b: Enable-WindowsFeatures.ps1
-  |      +--> Only features selected in GUI
-  |
-  +--> Phase 2: bootstrap-dev.sh (via Git Bash)
-         +--> Git config + SSH key
-         +--> Zsh + Oh My Zsh + Powerlevel10k + MesloLGS NF
-         +--> Oh My Posh for PowerShell (profile + modules)
-         +--> Oh My Posh for CMD (Clink + lua)
-         +--> Windows Terminal default profile
-         +--> VS Code extensions
-         +--> Language tooling (npm, pipx, rust, go, maven, gradle)
+  +--> Phase 2: bootstrap-dev.sh   (shell, dotfiles, SSH, tooling)
+  +--> Restore-Repositories        (git clone, restore mode only)
+  +--> ErrorReporter.Flush()       (queued failures -> setup_errors)
 ```
+
+---
+
+## Backup & restore
+
+| File | Role |
+|------|------|
+| `Setup-Wizard.ps1` | Dialogs only -- mode chooser, checklist, repo picker, sign-in |
+| `Setup-Flows.ps1` | Sequencing -- backup flow, restore flow, repo cloning |
+| `Shared/Modules/SetupInventory.psm1` | App inventory + repo discovery |
+
+UI and flow logic are kept apart so the sequencing can be reasoned about without
+touching WinForms.
+
+**What gets backed up:** application identities (name, package id, version) and
+repository *metadata* (name, remote URL, branch). Never file contents.
+
+**What's excluded:** games and launchers (Steam, Epic, Riot, Battle.net, ...),
+Windows updates/hotfixes, and anything whose install path sits under a game
+library. Runtimes and drivers are detected but unticked by default, since they
+normally arrive as dependencies.
+
+Apps without a package id can't be reinstalled automatically -- they're recorded
+for reference and unticked by default.
+
+**Restore** skips anything already installed, then clones selected repositories
+into `%USERPROFILE%\source\repos` (repos without a remote are skipped).
+
+---
+
+## Error reporting
+
+Failures are pushed to `setup_errors` with phase and package context. Reporting
+never throws: if the network or auth is unavailable the row is queued in memory
+and flushed at the end, so telemetry can't break an install.
+
+Clients may **insert** but never **select** -- otherwise users would see each
+other's machine names and paths. Triage is owner-only:
+
+```powershell
+$env:SUPABASE_SERVICE_KEY = '<secret key>'    # never commit or ship this
+./Shared/Admin/Get-SetupErrors.ps1            # open errors, newest first
+./Shared/Admin/Get-SetupErrors.ps1 -Summary   # grouped by message
+./Shared/Admin/Get-SetupErrors.ps1 -Resolve 42
+./Shared/Admin/Get-SetupErrors.ps1 -PurgeResolved
+```
+
+The script refuses to run without `SUPABASE_SERVICE_KEY` in the environment.
 
 ---
 

@@ -33,13 +33,15 @@ if (-not (Get-Command Invoke-ps2exe -ErrorAction SilentlyContinue)) {
 # Values are paths relative to Windows\; keys keep their layout on extraction.
 $SharedDir = Join-Path (Split-Path $ScriptDir) 'Shared'
 $allFiles = @(
-    'Setup.ps1', 'Setup-UI.ps1', 'restore.ps1', 'Enable-WindowsFeatures.ps1',
+    'Setup.ps1', 'Setup-UI.ps1', 'Setup-Wizard.ps1', 'Setup-Flows.ps1',
+    'restore.ps1', 'Enable-WindowsFeatures.ps1',
     'bootstrap-dev.sh', 'Sign-Scripts.ps1', 'Setup.cmd',
     'winget-packages.json', 'vscode-extensions.txt',
     'zshrc-template', 'p10k-template', 'zsh-gitbash.tar.gz'
 )
 $sharedFiles = @(
     'Modules\SetupCore.psm1',
+    'Modules\SetupInventory.psm1',
     'Config\supabase-config.json'
 )
 

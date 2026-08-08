@@ -189,24 +189,72 @@ function Show-DefaultShellMenu {
 }
 
 if (-not $Unattended) {
-    # Launch the GUI picker (Windows Forms with checkboxes + radio buttons).
-    $uiScript = Join-Path $ScriptDir 'Setup-UI.ps1'
-    if (Test-Path $uiScript) {
-        Write-Host "Opening setup configuration window..." -ForegroundColor Cyan
-        & $uiScript
-        if ($LASTEXITCODE -ne 0) {
-            Write-Host "Setup cancelled by user." -ForegroundColor Yellow
+    # Ask what kind of run this is before anything else.
+    $wizard = Join-Path $ScriptDir 'Setup-Wizard.ps1'
+    $flows = Join-Path $ScriptDir 'Setup-Flows.ps1'
+    $sharedRoot = Join-Path (Split-Path -Parent $ScriptDir) 'Shared'
+    if (-not (Test-Path $sharedRoot)) { $sharedRoot = Join-Path $ScriptDir 'Shared' }
+    $coreModule = Join-Path $sharedRoot 'Modules\SetupCore.psm1'
+    $invModule = Join-Path $sharedRoot 'Modules\SetupInventory.psm1'
+
+    $mode = 'fresh'
+    $restoreSelection = $null
+
+    if ((Test-Path $wizard) -and (Test-Path $flows) -and (Test-Path $coreModule)) {
+        . $wizard
+        . $flows
+        Import-Module $coreModule -Force
+        if (Test-Path $invModule) { Import-Module $invModule -Force }
+
+        $manager = New-ProfileManager -SharedRoot $sharedRoot
+        $mode = Show-ModeDialog
+        if (-not $mode) {
+            Write-Host 'Setup cancelled by user.' -ForegroundColor Yellow
             try { Stop-Transcript | Out-Null } catch { }
             exit 0
         }
-        $shellChoice = $env:SETUP_DEFAULT_SHELL
-        # $env:SETUP_CATEGORIES is already set by the UI script.
+
+        switch ($mode) {
+            'backup' {
+                $ok = Invoke-BackupFlow -Manager $manager -Scanner (New-InventoryScanner)
+                $manager.Errors.Flush() | Out-Null
+                try { Stop-Transcript | Out-Null } catch { }
+                exit $(if ($ok) { 0 } else { 1 })
+            }
+            'restore' {
+                $restoreSelection = Invoke-RestoreFlow -Manager $manager
+                if (-not $restoreSelection) {
+                    Write-Host 'Restore cancelled.' -ForegroundColor Yellow
+                    try { Stop-Transcript | Out-Null } catch { }
+                    exit 0
+                }
+                $env:SETUP_SELECTED_PACKAGES = ($restoreSelection.Packages -join ',')
+                $env:SETUP_FEATURES = ($restoreSelection.Features -join ',')
+                $env:SETUP_DEFAULT_SHELL = '1'
+                $env:SETUP_CATEGORIES = '1,2,3,4,5,6,7'
+                $shellChoice = '1'
+            }
+        }
     }
-    else {
-        # Fallback to console menu if GUI script is missing.
-        Show-SetupMenu -cats $allCategories
-        $shellChoice = Show-DefaultShellMenu
-        $env:SETUP_DEFAULT_SHELL = $shellChoice
+
+    if ($mode -eq 'fresh') {
+        # Standard catalogue picker.
+        $uiScript = Join-Path $ScriptDir 'Setup-UI.ps1'
+        if (Test-Path $uiScript) {
+            Write-Host "Opening setup configuration window..." -ForegroundColor Cyan
+            & $uiScript
+            if ($LASTEXITCODE -ne 0) {
+                Write-Host "Setup cancelled by user." -ForegroundColor Yellow
+                try { Stop-Transcript | Out-Null } catch { }
+                exit 0
+            }
+            $shellChoice = $env:SETUP_DEFAULT_SHELL
+        }
+        else {
+            Show-SetupMenu -cats $allCategories
+            $shellChoice = Show-DefaultShellMenu
+            $env:SETUP_DEFAULT_SHELL = $shellChoice
+        }
     }
 }
 else {
@@ -442,6 +490,17 @@ See the failure log: $ScriptDir\git-fallback-install.log
 }
 else {
     Write-Host "Skipping Phase 2 (zsh / dotfiles)." -ForegroundColor Yellow
+}
+
+# --- Restore repositories (restore mode only) ------------
+if ($restoreSelection -and $restoreSelection.Repos.Count -gt 0) {
+    Restore-Repositories -Repos $restoreSelection.Repos -Manager $manager
+}
+
+# --- Push any queued error reports -----------------------
+if ($manager) {
+    $sent = $manager.Errors.Flush()
+    if ($sent -gt 0) { Write-Host "  Reported $sent issue(s) for follow-up." -ForegroundColor DarkGray }
 }
 
 Write-Host ""

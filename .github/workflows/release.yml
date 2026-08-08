@@ -28,10 +28,21 @@ jobs:
       - name: Verify no secret keys were embedded
         shell: powershell
         run: |
-          $hit = Select-String -Path dist\Setup.exe -Pattern 'sb_secret','service_role' `
-            -SimpleMatch -Encoding byte -ErrorAction SilentlyContinue
-          if ($hit) { throw 'Secret key found in the built exe -- aborting release.' }
-          Write-Host 'Clean: no secret keys in the artifact.'
+          # Read as bytes: Select-String can't scan binaries reliably.
+          $bytes = [IO.File]::ReadAllBytes("$PWD\dist\Setup.exe")
+          $text  = [Text.Encoding]::ASCII.GetString($bytes)
+          # Match real key shapes, not the guard words that legitimately appear in source.
+          $patterns = @('sb_secret_[A-Za-z0-9]{10,}', 'xkeysib-[A-Za-z0-9]{20,}', 'eyJ[A-Za-z0-9_-]{20,}\.[A-Za-z0-9_-]{20,}')
+          $found = @()
+          foreach ($p in $patterns) {
+            if ($text -match $p) { $found += $Matches[0].Substring(0, 24) + '...' }
+          }
+          if ($found.Count -gt 0) {
+            Write-Host "::error::Secret-looking material found in the artifact:"
+            $found | ForEach-Object { Write-Host "  $_" }
+            exit 1
+          }
+          Write-Host "Clean: no secret keys in the artifact."
 
       - uses: actions/upload-artifact@v4
         with:

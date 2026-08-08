@@ -216,13 +216,36 @@ if (-not $Unattended) {
 
         switch ($mode) {
             'backup' {
-                $ok = Invoke-BackupFlow -Manager $manager -Scanner (New-InventoryScanner)
-                $manager.Errors.Flush() | Out-Null
+                # An unhandled error here would close the window with no explanation.
+                try {
+                    $ok = Invoke-BackupFlow -Manager $manager -Scanner (New-InventoryScanner)
+                }
+                catch {
+                    $ok = $false
+                    Write-Host ''
+                    Write-Host "Backup failed: $($_.Exception.Message)" -ForegroundColor Red
+                    Write-Host $_.ScriptStackTrace -ForegroundColor DarkGray
+                    try { $manager.Errors.ReportException('backup', '', $_) } catch { }
+                    try { Show-Toast "Backup failed:`r`n`r`n$($_.Exception.Message)`r`n`r`nDetails are in the log." } catch { }
+                }
+                try { $manager.Errors.Flush() | Out-Null } catch { }
+                Write-Host ''
+                Write-Host 'Press any key to close...' -ForegroundColor DarkGray
+                try { $null = $host.UI.RawUI.ReadKey('NoEcho,IncludeKeyDown') } catch { Start-Sleep 5 }
                 try { Stop-Transcript | Out-Null } catch { }
                 exit $(if ($ok) { 0 } else { 1 })
             }
             'restore' {
-                $restoreSelection = Invoke-RestoreFlow -Manager $manager
+                try {
+                    $restoreSelection = Invoke-RestoreFlow -Manager $manager
+                }
+                catch {
+                    Write-Host "Restore failed: $($_.Exception.Message)" -ForegroundColor Red
+                    Write-Host $_.ScriptStackTrace -ForegroundColor DarkGray
+                    try { $manager.Errors.ReportException('restore', '', $_) } catch { }
+                    try { Show-Toast "Restore failed:`r`n`r`n$($_.Exception.Message)" } catch { }
+                    $restoreSelection = $null
+                }
                 if (-not $restoreSelection) {
                     Write-Host 'Restore cancelled.' -ForegroundColor Yellow
                     try { Stop-Transcript | Out-Null } catch { }

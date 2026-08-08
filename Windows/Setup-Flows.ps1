@@ -11,9 +11,16 @@ function Invoke-BackupFlow {
     <# Inventory this machine, let the user prune it, then save. Returns $true on success. #>
     param([Parameter(Mandatory)]$Manager, [Parameter(Mandatory)]$Scanner)
 
-    Write-Host 'Scanning installed applications...' -ForegroundColor Cyan
-    $apps = $Scanner.ScanApplications()
-    Write-Host ("  found {0} applications" -f $apps.Count) -ForegroundColor DarkGray
+    try {
+        Write-Host 'Scanning installed applications...' -ForegroundColor Cyan
+        $apps = $Scanner.ScanApplications()
+        Write-Host ("  found {0} applications" -f $apps.Count) -ForegroundColor DarkGray
+    }
+    catch {
+        $Manager.Errors.ReportException('backup', '', $_)
+        Show-Toast "Couldn't scan this machine: $($_.Exception.Message)"
+        return $false
+    }
 
     $folders = Show-RepoFolderDialog
     if ($null -eq $folders) { return $false }
@@ -34,7 +41,7 @@ function Invoke-BackupFlow {
         $groups += @{
             Heading = "Applications that can be reinstalled automatically ($($restorable.Count))"
             Items   = @($restorable | Sort-Object Name | ForEach-Object {
-                    @{ Label = $_.Display(); Tag = $_; Checked = $_.Selected }
+                    @{ Label = $_.Display(); Tag = @{ Kind = 'app'; Item = $_ }; Checked = $_.Selected }
                 })
         }
     }
@@ -42,7 +49,7 @@ function Invoke-BackupFlow {
         $groups += @{
             Heading = "Detected, but no package id -- recorded for reference ($($manual.Count))"
             Items   = @($manual | Sort-Object Name | ForEach-Object {
-                    @{ Label = $_.Display(); Tag = $_; Checked = $false }
+                    @{ Label = $_.Display(); Tag = @{ Kind = 'app'; Item = $_ }; Checked = $false }
                 })
         }
     }
@@ -50,7 +57,7 @@ function Invoke-BackupFlow {
         $groups += @{
             Heading = "Repositories ($($repos.Count))"
             Items   = @($repos | Sort-Object Name | ForEach-Object {
-                    @{ Label = $_.Display(); Tag = $_; Checked = $true }
+                    @{ Label = $_.Display(); Tag = @{ Kind = 'repo'; Item = $_ }; Checked = $true }
                 })
         }
     }
@@ -65,8 +72,9 @@ function Invoke-BackupFlow {
         'Untick anything you don''t want to carry over.') -Groups $groups
     if ($null -eq $keep) { return $false }
 
-    $keptApps = @($keep | Where-Object { $_ -is [InstalledApp] })
-    $keptRepos = @($keep | Where-Object { $_ -is [GitRepository] })
+    # Discriminate on Kind: module classes aren't visible as type literals here.
+    $keptApps = @($keep | Where-Object { $_.Kind -eq 'app' } | ForEach-Object { $_.Item })
+    $keptRepos = @($keep | Where-Object { $_.Kind -eq 'repo' } | ForEach-Object { $_.Item })
     if ($keptApps.Count -eq 0 -and $keptRepos.Count -eq 0) {
         Show-Toast 'Nothing selected, so there was nothing to back up.'
         return $false

@@ -34,14 +34,69 @@ function New-WizardForm {
     param([string]$Title, [int]$Width = 760, [int]$Height = 620)
     $f = New-Object System.Windows.Forms.Form
     $f.Text = $Title
-    $f.Size = New-Object System.Drawing.Size($Width, $Height)
+    # Scale with the user's DPI instead of assuming 96dpi.
+    $f.AutoScaleMode = [System.Windows.Forms.AutoScaleMode]::Font
+    $f.AutoScaleDimensions = New-Object System.Drawing.SizeF(7, 15)
+    $f.ClientSize = New-Object System.Drawing.Size($Width, $Height)
+    $f.MinimumSize = New-Object System.Drawing.Size(520, 420)
     $f.StartPosition = 'CenterScreen'
-    $f.FormBorderStyle = 'FixedDialog'
-    $f.MaximizeBox = $false
+    $f.FormBorderStyle = 'Sizable'   # let users resize if their scaling is unusual
+    $f.MaximizeBox = $true
     $f.BackColor = $script:Ink.Bg
     $f.ForeColor = $script:Ink.Text
     $f.Font = New-Object System.Drawing.Font('Segoe UI', 9.5)
     return $f
+}
+
+function New-ScrollHost {
+    <# Scrollable content area that fills whatever space is left above the buttons. #>
+    param($Parent)
+    $p = New-Object System.Windows.Forms.Panel
+    $p.Dock = 'Fill'
+    $p.AutoScroll = $true
+    $p.BackColor = $script:Ink.Bg
+    $p.Padding = New-Object System.Windows.Forms.Padding(20, 10, 20, 10)
+    $Parent.Controls.Add($p)
+    return $p
+}
+
+function New-ButtonBar {
+    <# Fixed-height strip pinned to the bottom so buttons are never clipped. #>
+    param($Parent, [int]$Height = 56)
+    $b = New-Object System.Windows.Forms.Panel
+    $b.Dock = 'Bottom'
+    $b.Height = $Height
+    $b.BackColor = $script:Ink.Bg
+    $Parent.Controls.Add($b)
+    return $b
+}
+
+function New-HeaderBar {
+    param($Parent, [string]$Title, [string]$Subtitle, [int]$Height = 78)
+    $h = New-Object System.Windows.Forms.Panel
+    $h.Dock = 'Top'
+    $h.Height = $Height
+    $h.BackColor = $script:Ink.Bg
+    $Parent.Controls.Add($h)
+
+    $t = New-Object System.Windows.Forms.Label
+    $t.Text = $Title
+    $t.Font = New-Object System.Drawing.Font('Segoe UI', 15, [System.Drawing.FontStyle]::Bold)
+    $t.ForeColor = $script:Ink.Accent
+    $t.Location = New-Object System.Drawing.Point(20, 14)
+    $t.AutoSize = $true
+    $h.Controls.Add($t)
+
+    if ($Subtitle) {
+        $s = New-Object System.Windows.Forms.Label
+        $s.Text = $Subtitle
+        $s.ForeColor = $script:Ink.Muted
+        $s.Location = New-Object System.Drawing.Point(22, 46)
+        $s.Size = New-Object System.Drawing.Size(($Parent.ClientSize.Width - 50), 26)
+        $s.Anchor = 'Top,Left,Right'
+        $h.Controls.Add($s)
+    }
+    return $h
 }
 
 function New-WizardLabel {
@@ -77,60 +132,89 @@ function New-WizardButton {
 
 function Show-ModeDialog {
     # Returns 'backup', 'restore', 'fresh' or $null when cancelled.
-    $f = New-WizardForm -Title 'System-Setup' -Width 640 -Height 470
-    $choice = $null
+    $f = New-WizardForm -Title 'System-Setup' -Width 620 -Height 560
 
-    New-WizardLabel $f 'What would you like to do?' 30 24 560 34 $script:Ink.Accent 16 $true | Out-Null
-    New-WizardLabel $f 'Applications and settings only -- your files are never read or uploaded.' 32 60 560 20 $script:Ink.Muted | Out-Null
+    $bar = New-ButtonBar $f
+    $host_ = New-ScrollHost $f
+    New-HeaderBar $f 'What would you like to do?' 'Applications and settings only -- your files are never read or uploaded.' | Out-Null
 
     $options = @(
         @{ Key = 'backup'; Title = 'This is my OLD machine'
-            Desc = "Back up what's installed here, plus your repo folders,`r`nso you can restore it somewhere else."
+            Desc = "Back up what's installed here, plus your repo folders," + [Environment]::NewLine + 'so you can restore it somewhere else.'
         }
         @{ Key = 'restore'; Title = 'This is my NEW machine'
-            Desc = "Sign in and restore the apps and settings`r`nyou backed up previously."
+            Desc = 'Sign in and restore the apps and settings' + [Environment]::NewLine + 'you backed up previously.'
         }
         @{ Key = 'fresh'; Title = 'Just set up this machine'
-            Desc = "Skip backup and restore -- pick from the standard`r`ncatalogue of developer tools."
+            Desc = 'Skip backup and restore -- pick from the standard' + [Environment]::NewLine + 'catalogue of developer tools.'
         }
     )
 
-    $y = 100
+    # FlowLayoutPanel reflows on resize, so nothing is clipped at any DPI.
+    $flow = New-Object System.Windows.Forms.FlowLayoutPanel
+    $flow.Dock = 'Fill'
+    $flow.FlowDirection = 'TopDown'
+    $flow.WrapContents = $false
+    $flow.AutoScroll = $true
+    $flow.BackColor = $script:Ink.Bg
+    $host_.Controls.Add($flow)
+
+    $script:PickedMode = $null
     foreach ($opt in $options) {
         $card = New-Object System.Windows.Forms.Panel
-        $card.Location = New-Object System.Drawing.Point(30, $y)
-        $card.Size = New-Object System.Drawing.Size(560, 95)
+        $card.Size = New-Object System.Drawing.Size(540, 96)
+        $card.Margin = New-Object System.Windows.Forms.Padding(0, 0, 0, 12)
         $card.BackColor = $script:Ink.Panel
         $card.Cursor = [System.Windows.Forms.Cursors]::Hand
         $card.Tag = $opt.Key
-        $f.Controls.Add($card)
+        $flow.Controls.Add($card)
 
-        $t = New-WizardLabel $card $opt.Title 18 14 520 24 $script:Ink.Accent 11 $true
-        $d = New-WizardLabel $card $opt.Desc 18 40 520 44 $script:Ink.Muted
+        $t = New-Object System.Windows.Forms.Label
+        $t.Text = $opt.Title
+        $t.Font = New-Object System.Drawing.Font('Segoe UI', 11, [System.Drawing.FontStyle]::Bold)
+        $t.ForeColor = $script:Ink.Accent
+        $t.Location = New-Object System.Drawing.Point(18, 12)
+        $t.AutoSize = $true
+        $t.Tag = $opt.Key
+        $card.Controls.Add($t)
 
-        # Clicking anywhere on the card selects it.
-        $handler = {
-            $script:PickedMode = $this.Tag
+        $d = New-Object System.Windows.Forms.Label
+        $d.Text = $opt.Desc
+        $d.ForeColor = $script:Ink.Muted
+        $d.Location = New-Object System.Drawing.Point(18, 40)
+        $d.AutoSize = $true
+        $d.Tag = $opt.Key
+        $card.Controls.Add($d)
+
+        $click = {
+            param($sender, $e)
+            $script:PickedMode = $sender.Tag
             $f.DialogResult = [System.Windows.Forms.DialogResult]::OK
             $f.Close()
-        }.GetNewClosure()
-        $card.Add_Click($handler)
-        foreach ($child in @($t, $d)) {
-            $child.Tag = $opt.Key
-            $child.Add_Click($handler)
         }
-        $y += 108
+        $card.Add_Click($click); $t.Add_Click($click); $d.Add_Click($click)
+
+        $hoverOn = { param($s, $e) $s.BackColor = [System.Drawing.Color]::FromArgb(60, 60, 60) }
+        $hoverOff = { param($s, $e) $s.BackColor = $script:Ink.Panel }
+        $card.Add_MouseEnter($hoverOn); $card.Add_MouseLeave($hoverOff)
     }
 
-    $cancel = New-WizardButton $f 'Cancel' 480 ($y + 6) 110 32
+    $cancel = New-Object System.Windows.Forms.Button
+    $cancel.Text = 'Cancel'
+    $cancel.Size = New-Object System.Drawing.Size(110, 34)
+    $cancel.Location = New-Object System.Drawing.Point(($f.ClientSize.Width - 130), 10)
+    $cancel.Anchor = 'Top,Right'
+    $cancel.FlatStyle = 'Flat'
+    $cancel.BackColor = [System.Drawing.Color]::FromArgb(60, 60, 60)
+    $cancel.ForeColor = [System.Drawing.Color]::FromArgb(215, 215, 215)
     $cancel.DialogResult = [System.Windows.Forms.DialogResult]::Cancel
+    $bar.Controls.Add($cancel)
     $f.CancelButton = $cancel
 
-    $script:PickedMode = $null
     $result = $f.ShowDialog()
     $f.Dispose()
-    if ($result -eq [System.Windows.Forms.DialogResult]::OK) { $choice = $script:PickedMode }
-    return $choice
+    if ($result -eq [System.Windows.Forms.DialogResult]::OK) { return $script:PickedMode }
+    return $null
 }
 
 # =====================================================================
@@ -149,39 +233,54 @@ function Show-ChecklistDialog {
         [string]$ConfirmText = 'Continue'
     )
 
-    $f = New-WizardForm -Title $Title -Width 780 -Height 660
-    New-WizardLabel $f $Title 24 18 700 30 $script:Ink.Accent 15 $true | Out-Null
-    New-WizardLabel $f $Message 26 52 710 36 $script:Ink.Muted | Out-Null
+    $f = New-WizardForm -Title $Title -Width 760 -Height 620
 
-    $panel = New-Object System.Windows.Forms.Panel
-    $panel.Location = New-Object System.Drawing.Point(20, 96)
-    $panel.Size = New-Object System.Drawing.Size(725, 445)
-    $panel.AutoScroll = $true
-    $panel.BackColor = $script:Ink.Bg
-    $f.Controls.Add($panel)
+    $bar = New-ButtonBar $f 60
+    $status = New-Object System.Windows.Forms.Panel
+    $status.Dock = 'Bottom'; $status.Height = 26; $status.BackColor = $script:Ink.Bg
+    $f.Controls.Add($status)
+    $host_ = New-ScrollHost $f
+    New-HeaderBar $f $Title $Message 88 | Out-Null
+
+    $flow = New-Object System.Windows.Forms.FlowLayoutPanel
+    $flow.Dock = 'Fill'
+    $flow.FlowDirection = 'TopDown'
+    $flow.WrapContents = $false
+    $flow.AutoScroll = $true
+    $flow.BackColor = $script:Ink.Bg
+    $host_.Controls.Add($flow)
 
     $boxes = New-Object 'System.Collections.Generic.List[System.Windows.Forms.CheckBox]'
-    $y = 4
     foreach ($g in $Groups) {
         if ($g.Items.Count -eq 0) { continue }
-        New-WizardLabel $panel $g.Heading 4 $y 660 22 $script:Ink.Accent 10.5 $true | Out-Null
-        $y += 26
+        $head = New-Object System.Windows.Forms.Label
+        $head.Text = $g.Heading
+        $head.Font = New-Object System.Drawing.Font('Segoe UI', 10.5, [System.Drawing.FontStyle]::Bold)
+        $head.ForeColor = $script:Ink.Accent
+        $head.AutoSize = $true
+        $head.Margin = New-Object System.Windows.Forms.Padding(0, 10, 0, 4)
+        $flow.Controls.Add($head)
+
         foreach ($item in $g.Items) {
             $cb = New-Object System.Windows.Forms.CheckBox
             $cb.Text = $item.Label
             $cb.Tag = $item.Tag
             $cb.Checked = [bool]$item.Checked
-            $cb.Location = New-Object System.Drawing.Point(20, $y)
-            $cb.Size = New-Object System.Drawing.Size(670, 22)
+            $cb.AutoSize = $true
+            $cb.MaximumSize = New-Object System.Drawing.Size(660, 0)
+            $cb.Margin = New-Object System.Windows.Forms.Padding(16, 1, 0, 1)
             $cb.ForeColor = $script:Ink.Text
-            $panel.Controls.Add($cb)
+            $flow.Controls.Add($cb)
             $boxes.Add($cb)
-            $y += 23
         }
-        $y += 10
     }
 
-    $count = New-WizardLabel $f '' 26 552 300 20 $script:Ink.Muted
+    $count = New-Object System.Windows.Forms.Label
+    $count.ForeColor = $script:Ink.Muted
+    $count.Location = New-Object System.Drawing.Point(22, 4)
+    $count.AutoSize = $true
+    $status.Controls.Add($count)
+
     $refresh = {
         $n = @($boxes | Where-Object { $_.Checked }).Count
         $count.Text = "$n of $($boxes.Count) selected"
@@ -189,18 +288,20 @@ function Show-ChecklistDialog {
     foreach ($cb in $boxes) { $cb.Add_CheckedChanged($refresh) }
     & $refresh
 
-    $all = New-WizardButton $f 'Select All' 24 576 110 32
+    $all = New-WizardButton $bar 'Select All' 20 12 110 34
     $all.ForeColor = $script:Ink.Accent
     $all.Add_Click({ foreach ($cb in $boxes) { $cb.Checked = $true } }.GetNewClosure())
 
-    $none = New-WizardButton $f 'Deselect All' 140 576 110 32
+    $none = New-WizardButton $bar 'Deselect All' 138 12 110 34
     $none.Add_Click({ foreach ($cb in $boxes) { $cb.Checked = $false } }.GetNewClosure())
 
-    $ok = New-WizardButton $f $ConfirmText 500 574 130 36 $true
+    $ok = New-WizardButton $bar $ConfirmText ($f.ClientSize.Width - 260) 10 130 38 $true
+    $ok.Anchor = 'Top,Right'
     $ok.DialogResult = [System.Windows.Forms.DialogResult]::OK
     $f.AcceptButton = $ok
 
-    $cancel = New-WizardButton $f 'Cancel' 638 574 105 36
+    $cancel = New-WizardButton $bar 'Cancel' ($f.ClientSize.Width - 120) 10 105 38
+    $cancel.Anchor = 'Top,Right'
     $cancel.DialogResult = [System.Windows.Forms.DialogResult]::Cancel
     $f.CancelButton = $cancel
 

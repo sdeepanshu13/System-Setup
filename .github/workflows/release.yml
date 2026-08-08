@@ -62,6 +62,17 @@ jobs:
           }
           Write-Host "Clean: no secret keys in the artifact."
 
+      # Lets users confirm the download matches what CI built. Doesn't remove the
+      # SmartScreen prompt -- only a CA certificate does that.
+      - name: Generate checksum
+        shell: powershell
+        run: |
+          Push-Location dist
+          $h = Get-FileHash Setup.exe -Algorithm SHA256
+          "{0}  Setup.exe" -f $h.Hash.ToLower() | Set-Content SHA256SUMS.txt -Encoding ascii
+          Get-Content SHA256SUMS.txt
+          Pop-Location
+
       - uses: actions/upload-artifact@v4
         with:
           name: Setup.exe
@@ -71,7 +82,9 @@ jobs:
         if: startsWith(github.ref, 'refs/tags/')
         uses: softprops/action-gh-release@v2
         with:
-          files: dist/Setup.exe
+          files: |
+            dist/Setup.exe
+            dist/SHA256SUMS.txt
           generate_release_notes: true
           make_latest: "true"
 

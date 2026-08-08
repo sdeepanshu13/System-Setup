@@ -73,3 +73,31 @@ jobs:
         with:
           files: dist/Setup.exe
           generate_release_notes: true
+          make_latest: "true"
+
+      # GitHub's /releases/latest/download/ redirect has served a stale asset
+      # before, so the README points at the exact version and is refreshed here.
+      - name: Point README at this release
+        if: startsWith(github.ref, 'refs/tags/')
+        shell: bash
+        run: |
+          set -euo pipefail
+          TAG="${GITHUB_REF#refs/tags/}"
+          SIZE=$(stat -c%s dist/Setup.exe)
+          PRETTY=$(printf "%'d" "$SIZE")
+
+          git fetch origin main --quiet
+          git checkout main --quiet
+          sed -i -E "s#releases/download/v[0-9]+\.[0-9]+\.[0-9]+/Setup\.exe#releases/download/${TAG}/Setup.exe#g" README.md
+          sed -i -E "s#Download Setup\.exe \(v[0-9]+\.[0-9]+\.[0-9]+\)#Download Setup.exe (${TAG})#g" README.md
+          sed -i -E "s#\*\*~[0-9.]+ MB \([0-9,]+ bytes\)\*\*#**~$(awk "BEGIN{printf \"%.1f\", ${SIZE}/1048576}") MB (${PRETTY} bytes)**#g" README.md
+
+          if git diff --quiet README.md; then
+            echo "README already current."
+          else
+            git config user.name  "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git commit -qm "README: point download link at ${TAG}" README.md
+            git push origin main
+            echo "README updated to ${TAG}."
+          fi

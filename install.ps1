@@ -66,9 +66,24 @@ try {
     Get-ChildItem -Path $root.FullName -Recurse -Include *.ps1, *.psm1, *.cmd, *.sh `
         -ErrorAction SilentlyContinue | Unblock-File -ErrorAction SilentlyContinue
 
+    # `irm | iex` runs in memory, but invoking a .ps1 is policy-checked and the
+    # client default is Restricted. Scope this to the process only.
+    try { Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass -Force -ErrorAction Stop } catch { }
+
     Write-Host '  Starting setup...' -ForegroundColor Green
     Write-Host ''
-    & $setup
+
+    if ((Get-ExecutionPolicy -Scope Process) -in @('Bypass', 'Unrestricted')) {
+        & $setup
+    }
+    else {
+        # Policy is locked down (Group Policy); a child process with an explicit
+        # -ExecutionPolicy is the remaining option.
+        $p = Start-Process powershell.exe -PassThru -Wait -ArgumentList @(
+            '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', "`"$setup`""
+        )
+        if ($p.ExitCode -ne 0) { Write-Host "  Setup exited with code $($p.ExitCode)." -ForegroundColor Yellow }
+    }
 }
 catch {
     Write-Host ''

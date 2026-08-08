@@ -515,9 +515,17 @@ else {
     Write-Host "Skipping Phase 2 (zsh / dotfiles)." -ForegroundColor Yellow
 }
 
-# --- Restore repositories (restore mode only) ------------
-if ($restoreSelection -and $restoreSelection.Repos.Count -gt 0) {
-    Restore-Repositories -Repos $restoreSelection.Repos -Manager $manager
+# --- Restore repositories and settings (restore mode only) ---
+if ($restoreSelection) {
+    if ($restoreSelection.Repos.Count -gt 0) {
+        Restore-Repositories -Repos $restoreSelection.Repos -Manager $manager
+    }
+    if ($restoreSelection.Dotfiles -and $restoreSelection.Dotfiles.Count -gt 0) {
+        Restore-Dotfiles -Dotfiles $restoreSelection.Dotfiles -Manager $manager
+    }
+    if ($restoreSelection.Tools -and $restoreSelection.Tools.Count -gt 0) {
+        Restore-ToolLists -Tools $restoreSelection.Tools -Manager $manager
+    }
 }
 
 # --- Push any queued error reports -----------------------

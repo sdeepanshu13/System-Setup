@@ -51,6 +51,31 @@ class GitRepository {
     }
 }
 
+class EnvironmentSetting {
+    [string] $Name
+    [string] $Flag        # feature flag the installer already understands
+    [string] $Detail
+    [bool]   $Selected = $true
+
+    [string] Display() {
+        if ($this.Detail) { return "$($this.Name)  --  $($this.Detail)" }
+        return $this.Name
+    }
+}
+
+class DotFile {
+    [string] $Name        # logical name, e.g. '.zshrc'
+    [string] $Path        # where it came from
+    [string] $Target      # where to write it back, relative to the home dir
+    [string] $Content
+    [bool]   $Selected = $true
+
+    [string] Display() {
+        $kb = [Math]::Round(($this.Content.Length / 1KB), 1)
+        return "$($this.Name)  ($kb KB)"
+    }
+}
+
 class InventoryScanner {
 
     # Games and launchers are explicitly excluded -- this tool restores work
@@ -248,6 +273,183 @@ class InventoryScanner {
         }
         catch { }
     }
+
+    # --- Terminal, shell and tooling configuration ------------------------
+
+    hidden [string] HomeDir() {
+        $h = [Environment]::GetEnvironmentVariable('USERPROFILE')
+        if (-not $h) { $h = [Environment]::GetEnvironmentVariable('HOME') }
+        return $h
+    }
+
+    hidden [void] AddSetting([System.Collections.Generic.List[EnvironmentSetting]]$list,
+        [string]$name, [string]$flag, [string]$detail) {
+        $s = [EnvironmentSetting]::new()
+        $s.Name = $name; $s.Flag = $flag; $s.Detail = $detail
+        $list.Add($s)
+    }
+
+    [System.Collections.Generic.List[EnvironmentSetting]] ScanEnvironment() {
+        $found = [System.Collections.Generic.List[EnvironmentSetting]]::new()
+        $home_ = $this.HomeDir()
+        $git = Get-Command git -ErrorAction SilentlyContinue
+
+        if ($git) {
+            $n = ''; $e = ''
+            try { $n = (& $git.Source config --global user.name 2>$null) } catch { }
+            try { $e = (& $git.Source config --global user.email 2>$null) } catch { }
+            if ($n -or $e) { $this.AddSetting($found, 'Git identity and settings', 'gitssh', "$n <$e>") }
+        }
+        # The public key is recorded; the private key is never read.
+        if ($home_ -and (Test-Path -LiteralPath (Join-Path $home_ '.ssh\id_ed25519.pub'))) {
+            $this.AddSetting($found, 'SSH key for GitHub', 'gitssh', 'ed25519 (public key only)')
+        }
+
+        if ($home_ -and (Test-Path -LiteralPath (Join-Path $home_ '.oh-my-zsh'))) {
+            $theme = ''
+            $zshrc = Join-Path $home_ '.zshrc'
+            if (Test-Path -LiteralPath $zshrc) {
+                try {
+                    $m = Select-String -Path $zshrc -Pattern '^\s*ZSH_THEME="?([^"\r\n]+)"?' -ErrorAction SilentlyContinue |
+                    Select-Object -First 1
+                    if ($m) { $theme = $m.Matches[0].Groups[1].Value }
+                }
+                catch { }
+            }
+            $this.AddSetting($found, 'Oh My Zsh', 'zsh', $(if ($theme) { "theme: $theme" } else { '' }))
+        }
+        if ($home_ -and (Test-Path -LiteralPath (Join-Path $home_ '.p10k.zsh'))) {
+            $this.AddSetting($found, 'Powerlevel10k prompt', 'zsh', 'configured')
+        }
+
+        foreach ($z in @("$env:ProgramFiles\Git\usr\bin\zsh.exe", '/usr/bin/zsh', '/bin/zsh', '/opt/homebrew/bin/zsh')) {
+            if ($z -and (Test-Path -LiteralPath $z)) {
+                $this.AddSetting($found, 'Zsh shell', 'zsh', $z)
+                break
+            }
+        }
+
+        if (Get-Command oh-my-posh -ErrorAction SilentlyContinue) {
+            $this.AddSetting($found, 'Oh My Posh prompt', 'omp', '')
+        }
+        foreach ($p in @(
+                "$home_\Documents\PowerShell\Microsoft.PowerShell_profile.ps1",
+                "$home_\Documents\WindowsPowerShell\Microsoft.PowerShell_profile.ps1")) {
+            if ($p -and (Test-Path -LiteralPath $p)) {
+                $this.AddSetting($found, 'PowerShell profile', 'omp', (Split-Path -Leaf (Split-Path -Parent $p)))
+                break
+            }
+        }
+
+        $wt = Join-Path $env:LOCALAPPDATA 'Packages\Microsoft.WindowsTerminal_8wekyb3d8bbwe\LocalState\settings.json'
+        if (Test-Path -LiteralPath $wt) {
+            $this.AddSetting($found, 'Windows Terminal settings', 'terminal', 'profiles and default shell')
+        }
+
+        $fontDir = Join-Path $env:LOCALAPPDATA 'Microsoft\Windows\Fonts'
+        foreach ($d in @($fontDir, "$env:WINDIR\Fonts")) {
+            if ($d -and (Test-Path -LiteralPath $d)) {
+                try {
+                    if (Get-ChildItem -LiteralPath $d -Filter '*Meslo*' -ErrorAction SilentlyContinue | Select-Object -First 1) {
+                        $this.AddSetting($found, 'MesloLGS Nerd Font', 'nerdfont', '')
+                        break
+                    }
+                }
+                catch { }
+            }
+        }
+
+        $code = Get-Command code -ErrorAction SilentlyContinue
+        if (-not $code -and (Test-Path -LiteralPath "$env:LOCALAPPDATA\Programs\Microsoft VS Code\bin\code.cmd")) {
+            $code = @{ Source = "$env:LOCALAPPDATA\Programs\Microsoft VS Code\bin\code.cmd" }
+        }
+        if ($code) {
+            try {
+                $exts = @(& $code.Source --list-extensions 2>$null)
+                if ($exts.Count) { $this.AddSetting($found, 'VS Code extensions', 'vscode', "$($exts.Count) installed") }
+            }
+            catch { }
+        }
+
+        if (Get-Command npm -ErrorAction SilentlyContinue) {
+            $this.AddSetting($found, 'npm global packages', 'npm', '')
+        }
+        if (Get-Command pipx -ErrorAction SilentlyContinue) {
+            $this.AddSetting($found, 'Python tools (pipx)', 'pipx', '')
+        }
+        if (Get-Command rustup -ErrorAction SilentlyContinue) {
+            $this.AddSetting($found, 'Rust toolchain', 'rust', '')
+        }
+        if (Get-Command go -ErrorAction SilentlyContinue) {
+            $this.AddSetting($found, 'Go workspace', 'golang', '')
+        }
+
+        return $found
+    }
+
+    # Config files worth carrying over. Secrets are never included -- SSH
+    # private keys and credential stores are deliberately absent.
+    [System.Collections.Generic.List[DotFile]] ScanDotfiles() {
+        $found = [System.Collections.Generic.List[DotFile]]::new()
+        $home_ = $this.HomeDir()
+        if (-not $home_) { return $found }
+
+        $candidates = @(
+            @{ N = '.gitconfig'; P = (Join-Path $home_ '.gitconfig'); T = '.gitconfig' }
+            @{ N = '.zshrc'; P = (Join-Path $home_ '.zshrc'); T = '.zshrc' }
+            @{ N = '.p10k.zsh'; P = (Join-Path $home_ '.p10k.zsh'); T = '.p10k.zsh' }
+            @{ N = '.bashrc'; P = (Join-Path $home_ '.bashrc'); T = '.bashrc' }
+            @{ N = '.bash_profile'; P = (Join-Path $home_ '.bash_profile'); T = '.bash_profile' }
+            @{ N = 'ssh config'; P = (Join-Path $home_ '.ssh\config'); T = '.ssh/config' }
+            @{ N = 'PowerShell 7 profile'; P = (Join-Path $home_ 'Documents\PowerShell\Microsoft.PowerShell_profile.ps1'); T = 'Documents/PowerShell/Microsoft.PowerShell_profile.ps1' }
+            @{ N = 'Windows PowerShell profile'; P = (Join-Path $home_ 'Documents\WindowsPowerShell\Microsoft.PowerShell_profile.ps1'); T = 'Documents/WindowsPowerShell/Microsoft.PowerShell_profile.ps1' }
+            @{ N = 'Windows Terminal settings'; P = (Join-Path $env:LOCALAPPDATA 'Packages\Microsoft.WindowsTerminal_8wekyb3d8bbwe\LocalState\settings.json'); T = 'AppData/Local/Packages/Microsoft.WindowsTerminal_8wekyb3d8bbwe/LocalState/settings.json' }
+        )
+
+        foreach ($c in $candidates) {
+            if (-not (Test-Path -LiteralPath $c.P)) { continue }
+            try {
+                $item = Get-Item -LiteralPath $c.P -ErrorAction Stop
+                if ($item.Length -gt 256KB) { continue }   # config files, not data
+                $d = [DotFile]::new()
+                $d.Name = $c.N
+                $d.Path = $c.P
+                $d.Target = $c.T
+                $d.Content = Get-Content -LiteralPath $c.P -Raw -ErrorAction Stop
+                $found.Add($d)
+            }
+            catch { }
+        }
+        return $found
+    }
+
+    # Globally installed CLI tooling, so it can be reinstalled by name.
+    [hashtable] ScanToolLists() {
+        $lists = @{}
+        $code = Get-Command code -ErrorAction SilentlyContinue
+        if (-not $code -and (Test-Path -LiteralPath "$env:LOCALAPPDATA\Programs\Microsoft VS Code\bin\code.cmd")) {
+            $code = @{ Source = "$env:LOCALAPPDATA\Programs\Microsoft VS Code\bin\code.cmd" }
+        }
+        if ($code) {
+            try { $lists['vscode'] = @(& $code.Source --list-extensions 2>$null | Where-Object { $_ }) } catch { }
+        }
+        if (Get-Command npm -ErrorAction SilentlyContinue) {
+            try {
+                $raw = & npm ls -g --depth=0 --parseable 2>$null
+                $lists['npm'] = @($raw | ForEach-Object { Split-Path $_ -Leaf } |
+                    Where-Object { $_ -and $_ -ne 'node_modules' } | Sort-Object -Unique)
+            }
+            catch { }
+        }
+        if (Get-Command pipx -ErrorAction SilentlyContinue) {
+            try {
+                $raw = & pipx list --short 2>$null
+                $lists['pipx'] = @($raw | ForEach-Object { ($_ -split '\s+')[0] } | Where-Object { $_ })
+            }
+            catch { }
+        }
+        return $lists
+    }
 }
 
 function New-InventoryScanner { return [InventoryScanner]::new() }
@@ -261,4 +463,13 @@ function Get-LocalRepositories {
     return (New-InventoryScanner).ScanRepositories($Roots, $MaxDepth)
 }
 
-Export-ModuleMember -Function New-InventoryScanner, Get-InstalledApplications, Get-LocalRepositories
+function Get-EnvironmentSettings {
+    return (New-InventoryScanner).ScanEnvironment()
+}
+
+function Get-Dotfiles {
+    return (New-InventoryScanner).ScanDotfiles()
+}
+
+Export-ModuleMember -Function New-InventoryScanner, Get-InstalledApplications, Get-LocalRepositories,
+Get-EnvironmentSettings, Get-Dotfiles

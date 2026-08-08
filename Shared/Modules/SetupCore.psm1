@@ -248,21 +248,25 @@ class ProfileData {
     [string[]] $Packages = @()
     [string[]] $Features = @()
     [string] $DefaultShell = '1'
-    [object[]] $Apps = @()    # backed-up inventory: name/id/version/source
-    [object[]] $Repos = @()   # name/path/remote/branch
+    [object[]] $Apps = @()      # backed-up inventory: name/id/version/source
+    [object[]] $Repos = @()     # name/path/remote/branch
+    [object[]] $Dotfiles = @()  # shell, git and terminal config files
+    [hashtable] $Tools = @{}    # vscode extensions, npm globals, pipx tools
     [string] $UpdatedAt = ''
 
     [string] ToJson() {
         return (@{
-                schema       = 2
+                schema       = 3
                 name         = $this.Name
                 packages     = @($this.Packages)
                 features     = @($this.Features)
                 defaultShell = $this.DefaultShell
                 apps         = @($this.Apps)
                 repos        = @($this.Repos)
+                dotfiles     = @($this.Dotfiles)
+                tools        = $this.Tools
                 updatedAt    = (Get-Date).ToString('o')
-            } | ConvertTo-Json -Depth 8 -Compress)
+            } | ConvertTo-Json -Depth 10 -Compress)
     }
 
     static [ProfileData] FromJson([string]$json) {
@@ -280,6 +284,12 @@ class ProfileData {
         if ($o.PSObject.Properties.Name -contains 'features' -and $o.features) { $p.Features = @($o.features) }
         if ($o.PSObject.Properties.Name -contains 'apps' -and $o.apps) { $p.Apps = @($o.apps) }
         if ($o.PSObject.Properties.Name -contains 'repos' -and $o.repos) { $p.Repos = @($o.repos) }
+        if ($o.PSObject.Properties.Name -contains 'dotfiles' -and $o.dotfiles) { $p.Dotfiles = @($o.dotfiles) }
+        if ($o.PSObject.Properties.Name -contains 'tools' -and $o.tools) {
+            $t = @{}
+            foreach ($prop in $o.tools.PSObject.Properties) { $t[$prop.Name] = @($prop.Value) }
+            $p.Tools = $t
+        }
         return $p
     }
 }
@@ -903,11 +913,13 @@ function New-ProfileData {
         [string[]]$Features = @(),
         [string]$DefaultShell = '1',
         [object[]]$Apps = @(),
-        [object[]]$Repos = @()
+        [object[]]$Repos = @(),
+        [object[]]$Dotfiles = @(),
+        [hashtable]$Tools = @{}
     )
     $p = [ProfileData]::new()
     $p.Name = $Name; $p.Packages = $Packages; $p.Features = $Features; $p.DefaultShell = $DefaultShell
-    $p.Apps = $Apps; $p.Repos = $Repos
+    $p.Apps = $Apps; $p.Repos = $Repos; $p.Dotfiles = $Dotfiles; $p.Tools = $Tools
     return $p
 }
 

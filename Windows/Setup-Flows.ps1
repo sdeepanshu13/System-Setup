@@ -32,6 +32,19 @@ function Invoke-BackupFlow {
         Write-Host ("  found {0} repositories" -f $repos.Count) -ForegroundColor DarkGray
     }
 
+    Write-Host 'Reading terminal and shell settings...' -ForegroundColor Cyan
+    $settings = @(); $dotfiles = @(); $tools = @{}
+    try {
+        $settings = $Scanner.ScanEnvironment()
+        $dotfiles = $Scanner.ScanDotfiles()
+        $tools = $Scanner.ScanToolLists()
+        Write-Host ("  {0} settings, {1} config files" -f $settings.Count, $dotfiles.Count) -ForegroundColor DarkGray
+    }
+    catch {
+        $Manager.Errors.ReportException('backup', 'environment', $_)
+        Write-Host "  Couldn't read some settings: $($_.Exception.Message)" -ForegroundColor Yellow
+    }
+
     # Restorable apps first -- those are the ones we can actually reinstall.
     $restorable = @($apps | Where-Object { $_.Id })
     $manual = @($apps | Where-Object { -not $_.Id })
@@ -61,6 +74,22 @@ function Invoke-BackupFlow {
                 })
         }
     }
+    if ($settings.Count) {
+        $groups += @{
+            Heading = "Terminal and shell setup ($($settings.Count))"
+            Items   = @($settings | ForEach-Object {
+                    @{ Label = $_.Display(); Tag = @{ Kind = 'setting'; Item = $_ }; Checked = $true }
+                })
+        }
+    }
+    if ($dotfiles.Count) {
+        $groups += @{
+            Heading = "Config files ($($dotfiles.Count))"
+            Items   = @($dotfiles | ForEach-Object {
+                    @{ Label = $_.Display(); Tag = @{ Kind = 'dotfile'; Item = $_ }; Checked = $true }
+                })
+        }
+    }
 
     if ($groups.Count -eq 0) {
         Show-Toast 'Nothing was found to back up on this machine.'
@@ -75,6 +104,8 @@ function Invoke-BackupFlow {
     # Discriminate on Kind: module classes aren't visible as type literals here.
     $keptApps = @($keep | Where-Object { $_.Kind -eq 'app' } | ForEach-Object { $_.Item })
     $keptRepos = @($keep | Where-Object { $_.Kind -eq 'repo' } | ForEach-Object { $_.Item })
+    $keptSettings = @($keep | Where-Object { $_.Kind -eq 'setting' } | ForEach-Object { $_.Item })
+    $keptDotfiles = @($keep | Where-Object { $_.Kind -eq 'dotfile' } | ForEach-Object { $_.Item })
     if ($keptApps.Count -eq 0 -and $keptRepos.Count -eq 0) {
         Show-Toast 'Nothing selected, so there was nothing to back up.'
         return $false
@@ -85,13 +116,18 @@ function Invoke-BackupFlow {
 
     $data = New-ProfileData -Name $env:USERNAME `
         -Packages @($keptApps | Where-Object { $_.Id } | ForEach-Object { $_.Id }) `
-        -Features @() -DefaultShell '1' `
+        -Features @($keptSettings | ForEach-Object { $_.Flag } | Where-Object { $_ } | Sort-Object -Unique) `
+        -DefaultShell '1' `
         -Apps @($keptApps | ForEach-Object {
             @{ name = $_.Name; id = $_.Id; version = $_.Version; source = $_.Source; kind = $_.Kind }
         }) `
         -Repos @($keptRepos | ForEach-Object {
             @{ name = $_.Name; path = $_.Path; remote = $_.Remote; branch = $_.Branch }
-        })
+        }) `
+        -Dotfiles @($keptDotfiles | ForEach-Object {
+            @{ name = $_.Name; target = $_.Target; content = $_.Content }
+        }) `
+        -Tools $tools
 
     try {
         $saved = $Manager.SaveProfile($signIn.Passphrase, $data)
@@ -110,7 +146,8 @@ function Invoke-BackupFlow {
 
     $Manager.PublishIfLocal() | Out-Null
     Show-Toast ("Backup complete.`r`n`r`n" +
-        "$($keptApps.Count) application(s) and $($keptRepos.Count) repository record(s) saved, encrypted.`r`n`r`n" +
+        "$($keptApps.Count) application(s), $($keptRepos.Count) repository record(s),`r`n" +
+        "$($keptSettings.Count) setting(s) and $($keptDotfiles.Count) config file(s) saved, encrypted.`r`n`r`n" +
         'On your new machine, run this installer and choose "This is my NEW machine".')
     return $true
 }
@@ -147,9 +184,18 @@ function Invoke-RestoreFlow {
     }
     if ($data.Features.Count) {
         $groups += @{
-            Heading = "Settings and tooling ($($data.Features.Count))"
+            Heading = "Terminal and shell setup ($($data.Features.Count))"
             Items   = @($data.Features | ForEach-Object {
                     @{ Label = [string]$_; Tag = @{ Kind = 'feature'; Id = [string]$_ }; Checked = $true }
+                })
+        }
+    }
+    $dots = @($data.Dotfiles | Where-Object { $_ -and $_.target })
+    if ($dots.Count) {
+        $groups += @{
+            Heading = "Config files ($($dots.Count))"
+            Items   = @($dots | ForEach-Object {
+                    @{ Label = [string]$_.name; Tag = @{ Kind = 'dotfile'; Item = $_ }; Checked = $true }
                 })
         }
     }
@@ -181,6 +227,82 @@ function Invoke-RestoreFlow {
         Packages = @($picked | Where-Object { $_.Kind -eq 'app' } | ForEach-Object { $_.Id })
         Features = @($picked | Where-Object { $_.Kind -eq 'feature' } | ForEach-Object { $_.Id })
         Repos    = @($picked | Where-Object { $_.Kind -eq 'repo' })
+        Dotfiles = @($picked | Where-Object { $_.Kind -eq 'dotfile' } | ForEach-Object { $_.Item })
+        Tools    = $data.Tools
+    }
+}
+
+function Restore-Dotfiles {
+    <# Write saved config files back, keeping a copy of anything replaced. #>
+    param([array]$Dotfiles = @(), [Parameter(Mandatory)]$Manager)
+
+    if ($null -eq $Dotfiles -or $Dotfiles.Count -eq 0) { return }
+    $home_ = $env:USERPROFILE
+    $stamp = Get-Date -Format 'yyyyMMdd-HHmmss'
+
+    Write-Host ''
+    Write-Host 'Restoring terminal and shell config...' -ForegroundColor Cyan
+    foreach ($d in $Dotfiles) {
+        if (-not $d.target -or $null -eq $d.content) { continue }
+        $dest = Join-Path $home_ ($d.target -replace '/', '\')
+        try {
+            $parent = Split-Path -Parent $dest
+            if ($parent -and -not (Test-Path $parent)) { New-Item -ItemType Directory -Path $parent -Force | Out-Null }
+            # Never overwrite without leaving the original recoverable.
+            if (Test-Path $dest) { Copy-Item $dest "$dest.backup-$stamp" -Force -ErrorAction SilentlyContinue }
+            Set-Content -LiteralPath $dest -Value $d.content -Encoding UTF8 -Force
+            Write-Host ("  restored {0}" -f $d.name) -ForegroundColor Green
+        }
+        catch {
+            Write-Host ("  failed {0}: {1}" -f $d.name, $_.Exception.Message) -ForegroundColor Yellow
+            $Manager.Errors.ReportException('dotfiles', [string]$d.name, $_)
+        }
+    }
+}
+
+function Restore-ToolLists {
+    <# Reinstall globally installed tooling captured during backup. #>
+    param([hashtable]$Tools = @{}, [Parameter(Mandatory)]$Manager)
+
+    if ($null -eq $Tools -or $Tools.Count -eq 0) { return }
+
+    if ($Tools.ContainsKey('vscode') -and @($Tools['vscode']).Count) {
+        $code = Get-Command code -ErrorAction SilentlyContinue
+        if (-not $code -and (Test-Path "$env:LOCALAPPDATA\Programs\Microsoft VS Code\bin\code.cmd")) {
+            $code = @{ Source = "$env:LOCALAPPDATA\Programs\Microsoft VS Code\bin\code.cmd" }
+        }
+        if ($code) {
+            Write-Host ''
+            Write-Host ('Restoring {0} VS Code extension(s)...' -f @($Tools['vscode']).Count) -ForegroundColor Cyan
+            foreach ($ext in $Tools['vscode']) {
+                if (-not $ext) { continue }
+                try { & $code.Source --install-extension $ext --force 2>&1 | Out-Null }
+                catch { $Manager.Errors.ReportException('vscode', [string]$ext, $_) }
+            }
+            Write-Host '  done' -ForegroundColor Green
+        }
+    }
+
+    if ($Tools.ContainsKey('npm') -and @($Tools['npm']).Count -and (Get-Command npm -ErrorAction SilentlyContinue)) {
+        Write-Host ''
+        Write-Host ('Restoring {0} npm global(s)...' -f @($Tools['npm']).Count) -ForegroundColor Cyan
+        foreach ($p in $Tools['npm']) {
+            if (-not $p) { continue }
+            try { & npm install -g $p 2>&1 | Out-Null }
+            catch { $Manager.Errors.ReportException('npm', [string]$p, $_) }
+        }
+        Write-Host '  done' -ForegroundColor Green
+    }
+
+    if ($Tools.ContainsKey('pipx') -and @($Tools['pipx']).Count -and (Get-Command pipx -ErrorAction SilentlyContinue)) {
+        Write-Host ''
+        Write-Host ('Restoring {0} pipx tool(s)...' -f @($Tools['pipx']).Count) -ForegroundColor Cyan
+        foreach ($p in $Tools['pipx']) {
+            if (-not $p) { continue }
+            try { & pipx install $p 2>&1 | Out-Null }
+            catch { $Manager.Errors.ReportException('pipx', [string]$p, $_) }
+        }
+        Write-Host '  done' -ForegroundColor Green
     }
 }
 

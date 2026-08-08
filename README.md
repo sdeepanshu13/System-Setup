@@ -1,8 +1,8 @@
 # System-Setup
 
-**Set up a brand-new Windows dev machine in one click.**
+**Move your dev setup to a new machine, or build one from scratch.**
 
-Download. Double-click. Pick what you want. Done.
+Download one file. Double-click. Pick what you want. Done.
 
 ---
 
@@ -10,23 +10,67 @@ Download. Double-click. Pick what you want. Done.
 
 **[Download Setup.exe](https://github.com/sdeepanshu13/System-Setup/releases/latest/download/Setup.exe)**
 
-One file. Double-click it. That's it.
-
-No extracting, no scripts to poke at, no configuration. Everything it needs is
-bundled inside and cleaned up when it's done.
+One file. Nothing to extract, no scripts to run, no configuration. Everything it
+needs is bundled inside and cleaned up afterwards.
 
 ---
 
 ## How to use
 
-1. **Download** `Setup.exe` from the link above
-2. **Double-click** it (approve the Administrator prompt)
-3. **Check/uncheck** what you want in the GUI (or use **Select All** / **Deselect All**)
-4. **Pick** your default terminal
-5. **Click Install**
-6. **Reboot** once when it finishes
+Double-click `Setup.exe` and approve the Administrator prompt. It asks one
+question first:
 
-That's it. Your machine is ready.
+| Choose this | When | What happens |
+|-------------|------|--------------|
+| **This is my OLD machine** | You're moving off this PC | Saves a list of your apps and repo folders |
+| **This is my NEW machine** | You just got this PC | Signs you in and puts everything back |
+| **Just set up this machine** | Fresh start, nothing to restore | Pick from a catalogue of ~55 dev tools |
+
+Then tick what you want (**Select All** / **Deselect All** are there), click
+install, and reboot once at the end.
+
+---
+
+## Moving to a new machine
+
+### On your old machine
+
+1. Run `Setup.exe` and choose **"This is my OLD machine"**
+2. It scans what's installed -- **games are skipped automatically**
+3. Add the folders where you keep code (add as many as you like -- most people
+   have repos in more than one place)
+4. Review the list and untick anything you don't want to carry over
+5. Enter your **email** and a **passphrase**, then type the code we email you
+6. Done -- your setup is saved, encrypted
+
+### On your new machine
+
+1. Run `Setup.exe` and choose **"This is my NEW machine"**
+2. Enter the **same email + passphrase**, and the code we email you
+3. Tick what you want back
+4. It installs your apps and clones your repositories
+
+Anything already installed is skipped, so it's safe to run more than once.
+
+---
+
+## What's actually saved
+
+| Saved | Not saved |
+|-------|-----------|
+| App names and package IDs | Your documents or code |
+| App versions | Passwords or credentials |
+| Repo name, remote URL, branch | Repo contents |
+| Which tools/settings you picked | Browser history, email, anything personal |
+
+**Only applications and settings.** Your files are never read or uploaded.
+
+**Your data is encrypted before it leaves your machine** using your passphrase
+(AES-256). Nobody else can read it -- not other users, and not whoever runs the
+database. The trade-off: **if you forget your passphrase there is no recovery**,
+because the passphrase *is* the key.
+
+Don't want any of this? Click **Skip** and use it as a plain installer.
 
 ---
 
@@ -37,29 +81,10 @@ git clone https://github.com/sdeepanshu13/System-Setup.git
 cd System-Setup/Mac && chmod +x Setup.sh && ./Setup.sh
 ```
 
-Installs Homebrew and everything else for you. Same apps, same shell setup, and
-the **same preferences** -- sign in with the email you used on Windows and your
-selections come straight back.
+Installs Homebrew and everything else for you. Sign in with the same email you
+used on Windows and your saved settings come across.
 
 See [Mac/README.md](Mac/README.md) for details.
-
----
-
-## Sync your preferences across machines (optional)
-
-The first screen lets you save your exact selections and reuse them anywhere:
-
-1. Enter your **email or mobile number** and a **passphrase** you'll remember.
-2. We send a **one-time verification code** to that email/mobile to confirm it's you.
-3. Pick your apps and click **Install** -- your choices are saved.
-
-Next time -- even on a brand-new PC -- enter the same email/mobile + passphrase
-and your previous selections come back automatically.
-
-**Your data stays private.** It's stored **encrypted** (AES-256; only your
-passphrase can unlock it), so nobody else -- not even whoever runs the database --
-can read your selections. Forgot your passphrase or don't want this? Just click
-**Skip** and use the defaults.
 
 ---
 
@@ -123,9 +148,9 @@ Each is a separate checkbox:
 
 ## Requirements
 
-- Windows 10 or 11
+- Windows 10 or 11 (or macOS for the Mac installer)
 - Internet connection
-- Administrator account (the installer asks for permission automatically)
+- Administrator account -- the installer asks for permission automatically
 
 ---
 
@@ -133,15 +158,30 @@ Each is a separate checkbox:
 
 | Problem | Solution |
 |---------|----------|
-| SmartScreen warning | Click **More info** > **Run anyway**. The file is unsigned; see Sign-Scripts.ps1 to sign your own build. |
-| Weird characters in terminal | Set your terminal font to **MesloLGS NF** |
-| A package failed to install | Re-run Setup.exe. Already-installed packages are skipped automatically. |
-| WSL not working | Reboot first. It needs a restart. |
-| Need to change what's installed | Run Setup.exe again. Uncheck what you don't want. |
-| Forgot my passphrase | There's no recovery -- the passphrase *is* the encryption key. Click **Skip**, or start fresh with a new passphrase. |
-| "Couldn't send code" | Email delivery isn't configured. Click **Skip** to continue, or see [Windows/README.md](Windows/README.md#user-profiles-encrypted-cross-platform). |
-| An app didn't come back | Only apps with a known package id can be reinstalled. Others are listed in your backup for reference. |
-| A repo didn't clone | Repos without a remote are skipped -- there's nothing to clone from. |
+| **SmartScreen warning** | Click **More info** > **Run anyway**. The file is unsigned -- expected for an open-source build. |
+| Weird symbols in the terminal | Set your terminal font to **MesloLGS NF** |
+| A package failed to install | Just run `Setup.exe` again. Anything already installed is skipped. |
+| WSL not working | Reboot -- it needs a restart to activate. |
+| Want to change what's installed | Run it again and pick **"Just set up this machine"**. |
+| **Forgot my passphrase** | There's no recovery -- it *is* the encryption key. Start again with a new email or passphrase. |
+| "Couldn't send code" | Check spam. Otherwise click **Skip** and use it as a plain installer. |
+| An app didn't come back | Only apps with a known package ID can be reinstalled automatically. The rest are listed in your backup for reference. |
+| A repo didn't clone | Repos with no remote are skipped -- there's nothing to clone from. |
+| Nothing happens on double-click | Right-click > **Properties** > tick **Unblock**, then try again. |
+
+---
+
+## For developers
+
+| | |
+|---|---|
+| [Windows/README.md](Windows/README.md) | Architecture, wizard internals, error triage |
+| [Mac/README.md](Mac/README.md) | macOS installer and Homebrew catalogue |
+| [CONTRIBUTING.md](CONTRIBUTING.md) | How to add packages or contribute |
+
+Adding an app needs no code -- just an entry in
+[winget-packages.json](Windows/winget-packages.json) or
+[brew-packages.json](Mac/brew-packages.json).
 
 ---
 

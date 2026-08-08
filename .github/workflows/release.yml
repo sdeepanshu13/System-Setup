@@ -1,20 +1,58 @@
 name: Build & Release Setup.exe
 
-# Produces the single downloadable file users get. Tag a release to publish:
-#   git tag v1.0.1 && git push origin v1.0.1
+# Every push to main produces a new patch release and repoints the README.
+#
+# Loop guard: this workflow pushes a README commit itself. That commit carries
+# [skip ci] and the job also ignores the bot actor, so it can't retrigger
+# endlessly.
 on:
   push:
+    branches: [main]
     tags: ["v*"]
   workflow_dispatch:
 
 permissions:
   contents: write
 
+concurrency:
+  group: release
+  cancel-in-progress: false
+
 jobs:
   build:
     runs-on: windows-latest
+    if: >-
+      !contains(github.event.head_commit.message, '[skip ci]') &&
+      github.actor != 'github-actions[bot]'
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # tags needed to work out the next version
+
+      - name: Work out the next version
+        id: ver
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ "$GITHUB_REF" == refs/tags/* ]]; then
+            TAG="${GITHUB_REF#refs/tags/}"
+          else
+            git fetch --tags --quiet || true
+            LATEST=$(git tag -l 'v[0-9]*' --sort=-v:refname | head -1)
+            if [[ -z "$LATEST" ]]; then
+              TAG="v1.0.0"
+            else
+              V="${LATEST#v}"
+              MAJOR="${V%%.*}"; REST="${V#*.}"
+              MINOR="${REST%%.*}"
+              PATCH="${REST#*.}"
+              [[ "$PATCH" == "$REST" ]] && PATCH=0          # tags like v1.0
+              [[ "$PATCH" =~ ^[0-9]+$ ]] || PATCH=0
+              TAG="v${MAJOR}.${MINOR}.$((PATCH + 1))"
+            fi
+          fi
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "Releasing $TAG"
 
       - name: Install ps2exe
         shell: powershell
@@ -78,10 +116,24 @@ jobs:
           name: Setup.exe
           path: dist/Setup.exe
 
-      - name: Publish to release
-        if: startsWith(github.ref, 'refs/tags/')
+      - name: Tag this build
+        shell: bash
+        run: |
+          set -euo pipefail
+          TAG="${{ steps.ver.outputs.tag }}"
+          if git rev-parse "$TAG" >/dev/null 2>&1; then
+            echo "$TAG already exists."
+          else
+            git config user.name  "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git tag -a "$TAG" -m "$TAG"
+            git push origin "$TAG"
+          fi
+
+      - name: Publish release
         uses: softprops/action-gh-release@v2
         with:
+          tag_name: ${{ steps.ver.outputs.tag }}
           files: |
             dist/Setup.exe
             dist/SHA256SUMS.txt
@@ -91,26 +143,27 @@ jobs:
       # GitHub's /releases/latest/download/ redirect has served a stale asset
       # before, so the README points at the exact version and is refreshed here.
       - name: Point README at this release
-        if: startsWith(github.ref, 'refs/tags/')
         shell: bash
         run: |
           set -euo pipefail
-          TAG="${GITHUB_REF#refs/tags/}"
+          TAG="${{ steps.ver.outputs.tag }}"
           SIZE=$(stat -c%s dist/Setup.exe)
           PRETTY=$(printf "%'d" "$SIZE")
+          MB=$(awk "BEGIN{printf \"%.1f\", ${SIZE}/1048576}")
 
-          git fetch origin main --quiet
           git checkout main --quiet
-          sed -i -E "s#releases/download/v[0-9]+\.[0-9]+\.[0-9]+/Setup\.exe#releases/download/${TAG}/Setup.exe#g" README.md
-          sed -i -E "s#Download Setup\.exe \(v[0-9]+\.[0-9]+\.[0-9]+\)#Download Setup.exe (${TAG})#g" README.md
-          sed -i -E "s#\*\*~[0-9.]+ MB \([0-9,]+ bytes\)\*\*#**~$(awk "BEGIN{printf \"%.1f\", ${SIZE}/1048576}") MB (${PRETTY} bytes)**#g" README.md
+          git pull --ff-only --quiet origin main || true
+
+          sed -i -E "s#releases/download/v[0-9]+(\.[0-9]+)+/Setup\.exe#releases/download/${TAG}/Setup.exe#g" README.md
+          sed -i -E "s#Download Setup\.exe \(v[0-9]+(\.[0-9]+)+\)#Download Setup.exe (${TAG})#g" README.md
+          sed -i -E "s#\*\*~[0-9.]+ MB \([0-9,]+ bytes\)\*\*#**~${MB} MB (${PRETTY} bytes)**#g" README.md
 
           if git diff --quiet README.md; then
             echo "README already current."
           else
             git config user.name  "github-actions[bot]"
             git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-            git commit -qm "README: point download link at ${TAG}" README.md
+            git commit -qm "README: point download at ${TAG} [skip ci]" README.md
             git push origin main
             echo "README updated to ${TAG}."
           fi

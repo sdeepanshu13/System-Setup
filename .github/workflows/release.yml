@@ -54,14 +54,10 @@ jobs:
           echo "tag=$TAG" >> "$GITHUB_OUTPUT"
           echo "Releasing $TAG"
 
-      - name: Install ps2exe
-        shell: powershell
-        run: Install-Module ps2exe -Scope CurrentUser -Force -Repository PSGallery
-
-      - name: Build Setup.exe
+      - name: Build Setup.exe (Inno Setup)
         shell: powershell
         working-directory: Windows
-        run: .\Build-Exe.ps1
+        run: .\Build-Installer.ps1 -Version '${{ steps.ver.outputs.tag }}'
 
       # Runs only when the signing secrets exist, so forks build fine unsigned.
       - name: Sign Setup.exe

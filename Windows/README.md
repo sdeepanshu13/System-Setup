@@ -379,6 +379,44 @@ expires.
 
 ---
 
+## Single-file distribution
+
+`Build-Installer.ps1` compiles `installer.iss` with Inno Setup into one
+`Setup.exe`. Files extract to `{tmp}`, the setup runs, and nothing is left on
+disk -- no install directory, no uninstaller, no registry entries.
+
+```powershell
+cd Windows
+.\Build-Installer.ps1 -Version 1.2.0
+```
+
+`Build-Exe.ps1` (ps2exe) is kept for reference but is no longer used by CI.
+
+### Antivirus behaviour
+
+The installer bundles PowerShell that inventories installed software and
+uploads an encrypted profile. To an ML classifier that reads as
+*collect system data -> encrypt -> send to a remote server*, which is the
+infostealer pattern -- so unsigned builds get flagged
+(`Trojan:Win32/Wacatac.C!ml`, `Phonzy.B!ml`) and sometimes quarantined on
+download.
+
+Findings from testing:
+
+| | Result |
+|---|---|
+| Locally built, with Mark-of-the-Web | clean |
+| Same version downloaded from a release | quarantined |
+| ps2exe vs Inno Setup | **both flagged** -- packaging isn't the cause |
+
+Only **code signing** reliably fixes this; see [code signing](#code-signing).
+Releases are cut from tags rather than every push so a build isn't perpetually
+brand new, which is what these classifiers penalise most.
+
+Running from a clone (`Windows\Setup.cmd`) avoids the issue entirely.
+
+---
+
 ## Building Setup.exe
 
 ```powershell

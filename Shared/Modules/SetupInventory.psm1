@@ -387,39 +387,133 @@ class InventoryScanner {
         return $found
     }
 
-    # Config files worth carrying over. Secrets are never included -- SSH
-    # private keys and credential stores are deliberately absent.
+    # Files that routinely hold credentials. Never collected, at any size.
+    static [string[]] $SecretFiles = @(
+        '.git-credentials', '.netrc', '_netrc', 'credentials',
+        'id_rsa', 'id_ed25519', 'id_ecdsa', 'id_dsa'
+    )
+
+    # Content that means a file holds a secret even if its name looks harmless.
+    static [string[]] $SecretPatterns = @(
+        'PRIVATE KEY', '_authToken', 'authToken\s*=', 'password\s*=\s*\S',
+        'client_secret', 'api[_-]?key\s*[:=]\s*\S', 'aws_secret_access_key',
+        '"auths"\s*:', 'ghp_[A-Za-z0-9]{20,}', 'xox[baprs]-'
+    )
+
+    static [bool] LooksSecret([string]$path, [string]$content) {
+        $leaf = Split-Path -Leaf $path
+        foreach ($n in [InventoryScanner]::SecretFiles) {
+            if ($leaf -ieq $n) { return $true }
+        }
+        if ($content) {
+            foreach ($p in [InventoryScanner]::SecretPatterns) {
+                if ($content -match $p) { return $true }
+            }
+        }
+        return $false
+    }
+
+    hidden [void] TryAddDotfile([System.Collections.Generic.List[DotFile]]$list,
+        [string]$name, [string]$path, [string]$target) {
+        if (-not (Test-Path -LiteralPath $path)) { return }
+        try {
+            $item = Get-Item -LiteralPath $path -Force -ErrorAction Stop
+            if ($item.PSIsContainer) { return }
+            if ($item.Length -gt 512KB) { return }      # config, not data
+            $content = Get-Content -LiteralPath $path -Raw -ErrorAction Stop
+            if ([string]::IsNullOrEmpty($content)) { return }
+            # Skip anything holding credentials rather than trying to redact it.
+            if ([InventoryScanner]::LooksSecret($path, $content)) { return }
+
+            $d = [DotFile]::new()
+            $d.Name = $name
+            $d.Path = $path
+            $d.Target = $target
+            $d.Content = $content
+            $list.Add($d)
+        }
+        catch { }
+    }
+
+    # Config files worth carrying over. Anything containing credentials is
+    # skipped -- see SecretFiles / SecretPatterns above.
     [System.Collections.Generic.List[DotFile]] ScanDotfiles() {
         $found = [System.Collections.Generic.List[DotFile]]::new()
         $home_ = $this.HomeDir()
         if (-not $home_) { return $found }
 
-        $candidates = @(
-            @{ N = '.gitconfig'; P = (Join-Path $home_ '.gitconfig'); T = '.gitconfig' }
-            @{ N = '.zshrc'; P = (Join-Path $home_ '.zshrc'); T = '.zshrc' }
-            @{ N = '.p10k.zsh'; P = (Join-Path $home_ '.p10k.zsh'); T = '.p10k.zsh' }
-            @{ N = '.bashrc'; P = (Join-Path $home_ '.bashrc'); T = '.bashrc' }
-            @{ N = '.bash_profile'; P = (Join-Path $home_ '.bash_profile'); T = '.bash_profile' }
-            @{ N = 'ssh config'; P = (Join-Path $home_ '.ssh\config'); T = '.ssh/config' }
-            @{ N = 'PowerShell 7 profile'; P = (Join-Path $home_ 'Documents\PowerShell\Microsoft.PowerShell_profile.ps1'); T = 'Documents/PowerShell/Microsoft.PowerShell_profile.ps1' }
-            @{ N = 'Windows PowerShell profile'; P = (Join-Path $home_ 'Documents\WindowsPowerShell\Microsoft.PowerShell_profile.ps1'); T = 'Documents/WindowsPowerShell/Microsoft.PowerShell_profile.ps1' }
-            @{ N = 'Windows Terminal settings'; P = (Join-Path $env:LOCALAPPDATA 'Packages\Microsoft.WindowsTerminal_8wekyb3d8bbwe\LocalState\settings.json'); T = 'AppData/Local/Packages/Microsoft.WindowsTerminal_8wekyb3d8bbwe/LocalState/settings.json' }
+        # name, path relative to home, restore target
+        $simple = @(
+            '.gitconfig', '.gitignore_global', '.gitattributes_global',
+            '.zshrc', '.zshenv', '.zprofile', '.zlogin', '.zsh_aliases',
+            '.p10k.zsh', '.bashrc', '.bash_profile', '.bash_aliases',
+            '.bash_logout', '.profile', '.inputrc', '.editorconfig',
+            '.vimrc', '.curlrc', '.wgetrc', '.condarc', '.wslconfig',
+            '.minttyrc', '.tmux.conf'
         )
+        foreach ($f in $simple) {
+            $this.TryAddDotfile($found, $f, (Join-Path $home_ $f), $f)
+        }
 
-        foreach ($c in $candidates) {
-            if (-not (Test-Path -LiteralPath $c.P)) { continue }
+        # SSH config only -- keys are excluded by LooksSecret.
+        $this.TryAddDotfile($found, 'ssh config', (Join-Path $home_ '.ssh\config'), '.ssh/config')
+
+        # Shell profiles.
+        $this.TryAddDotfile($found, 'PowerShell 7 profile',
+            (Join-Path $home_ 'Documents\PowerShell\Microsoft.PowerShell_profile.ps1'),
+            'Documents/PowerShell/Microsoft.PowerShell_profile.ps1')
+        $this.TryAddDotfile($found, 'Windows PowerShell profile',
+            (Join-Path $home_ 'Documents\WindowsPowerShell\Microsoft.PowerShell_profile.ps1'),
+            'Documents/WindowsPowerShell/Microsoft.PowerShell_profile.ps1')
+
+        # Terminal.
+        $wtRel = 'AppData/Local/Packages/Microsoft.WindowsTerminal_8wekyb3d8bbwe/LocalState/settings.json'
+        $this.TryAddDotfile($found, 'Windows Terminal settings',
+            (Join-Path $env:LOCALAPPDATA 'Packages\Microsoft.WindowsTerminal_8wekyb3d8bbwe\LocalState\settings.json'),
+            $wtRel)
+
+        # VS Code user settings.
+        $codeUser = Join-Path $env:APPDATA 'Code\User'
+        foreach ($f in @('settings.json', 'keybindings.json')) {
+            $this.TryAddDotfile($found, "VS Code $f", (Join-Path $codeUser $f), "AppData/Roaming/Code/User/$f")
+        }
+        $snippets = Join-Path $codeUser 'snippets'
+        if (Test-Path -LiteralPath $snippets) {
             try {
-                $item = Get-Item -LiteralPath $c.P -ErrorAction Stop
-                if ($item.Length -gt 256KB) { continue }   # config files, not data
-                $d = [DotFile]::new()
-                $d.Name = $c.N
-                $d.Path = $c.P
-                $d.Target = $c.T
-                $d.Content = Get-Content -LiteralPath $c.P -Raw -ErrorAction Stop
-                $found.Add($d)
+                foreach ($s in (Get-ChildItem -LiteralPath $snippets -Filter '*.json' -File -ErrorAction SilentlyContinue)) {
+                    $this.TryAddDotfile($found, "VS Code snippet: $($s.Name)", $s.FullName,
+                        "AppData/Roaming/Code/User/snippets/$($s.Name)")
+                }
             }
             catch { }
         }
+
+        # Oh My Zsh customisations the user wrote themselves.
+        $omzCustom = Join-Path $home_ '.oh-my-zsh\custom'
+        if (Test-Path -LiteralPath $omzCustom) {
+            try {
+                foreach ($z in (Get-ChildItem -LiteralPath $omzCustom -Filter '*.zsh' -File -ErrorAction SilentlyContinue)) {
+                    if ($z.Name -like 'example*') { continue }
+                    $this.TryAddDotfile($found, "oh-my-zsh custom: $($z.Name)", $z.FullName,
+                        ".oh-my-zsh/custom/$($z.Name)")
+                }
+            }
+            catch { }
+        }
+
+        # Prompt and CLI configs under .config.
+        foreach ($rel in @('starship.toml', 'powershell\Microsoft.PowerShell_profile.ps1')) {
+            $p = Join-Path $home_ (Join-Path '.config' $rel)
+            $this.TryAddDotfile($found, ".config/$rel", $p, ".config/$($rel -replace '\\','/')")
+        }
+
+        # Cloud CLI config, never the credentials file beside it.
+        $this.TryAddDotfile($found, 'aws config', (Join-Path $home_ '.aws\config'), '.aws/config')
+
+        # npm/yarn config only if it carries no auth token.
+        $this.TryAddDotfile($found, '.npmrc', (Join-Path $home_ '.npmrc'), '.npmrc')
+        $this.TryAddDotfile($found, '.yarnrc', (Join-Path $home_ '.yarnrc'), '.yarnrc')
+
         return $found
     }
 

@@ -8,10 +8,19 @@ Download one file. Double-click. Pick what you want. Done.
 
 ## Download
 
-**[Download Setup.exe](https://github.com/sdeepanshu13/System-Setup/releases/latest/download/Setup.exe)**
+**[Download Setup.exe (v1.1.0)](https://github.com/sdeepanshu13/System-Setup/releases/download/v1.1.0/Setup.exe)**
 
 One file. Nothing to extract, no scripts to run, no configuration. Everything it
 needs is bundled inside and cleaned up afterwards.
+
+*Other versions: [all releases](https://github.com/sdeepanshu13/System-Setup/releases).
+Always take the newest -- older builds don't have the backup/restore flow.*
+
+> **Check you got the right file.** It should be **~3.2 MB (3,295,232 bytes)**.
+> If yours is smaller, it's an older build -- delete it and download again.
+> ```powershell
+> (Get-Item "$env:USERPROFILE\Downloads\Setup.exe").Length
+> ```
 
 ---
 

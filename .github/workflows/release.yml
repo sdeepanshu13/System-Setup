@@ -4,7 +4,7 @@ name: Build & Release Setup.exe
 #   git tag v1.0.1 && git push origin v1.0.1
 on:
   push:
-    tags: ['v*']
+    tags: ["v*"]
   workflow_dispatch:
 
 permissions:

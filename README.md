@@ -2,19 +2,38 @@
 
 **Move your dev setup to a new machine, or build one from scratch.**
 
-Download one file. Double-click. Pick what you want. Done.
+---
+
+## Install
+
+Open **PowerShell as Administrator** and run:
+
+```powershell
+irm https://raw.githubusercontent.com/sdeepanshu13/System-Setup/main/install.ps1 | iex
+```
+
+That's it. It fetches the latest version and opens the setup wizard.
+
+**Recommended**, because it always gives you the newest fix and antivirus
+doesn't interfere with it.
 
 ---
 
-## Download
+## Or download the installer
 
 **[Download Setup.exe (v1.1.3)](https://github.com/sdeepanshu13/System-Setup/releases/download/v1.1.3/Setup.exe)**
 
-One file. Nothing to extract, no scripts to run, no configuration. Everything it
-needs is bundled inside and cleaned up afterwards.
+> **Heads-up:** Windows Defender often **deletes this file on download**,
+> reporting `Trojan:Win32/Wacatac`. It's a false positive, but it's persistent.
+>
+> The installer inventories your installed software, encrypts it and uploads it
+> so you can restore it elsewhere. That sequence matches the pattern of
+> data-stealing malware, and an unsigned download has no reputation to offset
+> it. Only a code-signing certificate fixes it properly.
+>
+> **Use the PowerShell command above instead** -- same app, no interference.
 
-*Other versions: [all releases](https://github.com/sdeepanshu13/System-Setup/releases).
-Always take the newest -- older builds don't have the backup/restore flow.*
+*Other versions: [all releases](https://github.com/sdeepanshu13/System-Setup/releases).*
 
 > **Check you got the right file.** It should be **~4.1 MB (4299440 bytes)**.
 > If yours is smaller, it's an older build -- delete it and download again.

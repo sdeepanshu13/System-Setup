@@ -158,7 +158,7 @@ Each is a separate checkbox:
 
 | Problem | Solution |
 |---------|----------|
-| **SmartScreen warning** | Click **More info** > **Run anyway**. The file is unsigned -- expected for an open-source build. |
+| **SmartScreen warning** | Click **More info** > **Run anyway**. The build is unsigned -- see [code signing](Windows/README.md#code-signing) if you want to sign your own. |
 | Weird symbols in the terminal | Set your terminal font to **MesloLGS NF** |
 | A package failed to install | Just run `Setup.exe` again. Anything already installed is skipped. |
 | WSL not working | Reboot -- it needs a restart to activate. |

@@ -188,6 +188,13 @@ $ps2exeArgs = @{
 Invoke-ps2exe @ps2exeArgs
 
 if (Test-Path $exePath) {
+    # Sign when a certificate is available; unsigned builds still succeed.
+    $signer = Join-Path $ScriptDir 'Sign-Exe.ps1'
+    if (Test-Path $signer) {
+        Write-Host ""
+        & $signer -Path $exePath
+    }
+
     $sizeMB = (Get-Item $exePath).Length / 1MB
     Write-Host ""
     Write-Host "  Build successful!" -ForegroundColor Green

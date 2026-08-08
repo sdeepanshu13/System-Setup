@@ -336,6 +336,49 @@ Windows\logs\20260426-125500\
 
 ---
 
+## Code signing
+
+`Sign-Exe.ps1` signs `dist\Setup.exe`. `Build-Exe.ps1` calls it automatically and
+**skips quietly when no certificate is present**, so unsigned builds still work.
+
+Certificate resolution order:
+
+1. `-PfxPath <file.pfx>`
+2. `CODE_SIGN_PFX_BASE64` environment variable (CI)
+3. an installed cert in `CurrentUser\My` matching `-Subject`
+4. `-SelfSigned` -- creates one on the fly
+
+Passwords come from `CODE_SIGN_PASSWORD` or a SecureString prompt. They are
+never passed as arguments and never logged.
+
+### What actually clears SmartScreen
+
+| Approach | Cost | Effect |
+|----------|------|--------|
+| Unsigned | free | Warning until reputation builds |
+| **Self-signed** | free | **Still warns.** Shows "Unknown Publisher" -- the chain terminates in an untrusted root |
+| OV certificate | ~$200-400/yr | Warning at first, clears as downloads accumulate |
+| **EV certificate** | ~$300-600/yr | **Clears immediately** |
+
+Self-signing only helps where you control the machines: export `CodeSigning.cer`
+and push it to **Trusted Publishers** (GPO or Intune). For public downloads,
+nothing but a CA-issued certificate helps.
+
+### Signing in CI
+
+Add two repository secrets and the release workflow signs automatically:
+
+| Secret | Value |
+|--------|-------|
+| `CODE_SIGN_PFX_BASE64` | `[Convert]::ToBase64String([IO.File]::ReadAllBytes('cert.pfx'))` |
+| `CODE_SIGN_PASSWORD` | the .pfx password |
+
+Without them the workflow builds unsigned and emits a warning, so forks aren't
+blocked. Signatures are timestamped, so they stay valid after the certificate
+expires.
+
+---
+
 ## Building Setup.exe
 
 ```powershell

@@ -25,6 +25,24 @@ jobs:
         working-directory: Windows
         run: .\Build-Exe.ps1
 
+      # Runs only when the signing secrets exist, so forks build fine unsigned.
+      - name: Sign Setup.exe
+        if: ${{ env.CODE_SIGN_PFX_BASE64 != '' }}
+        shell: powershell
+        working-directory: Windows
+        env:
+          CODE_SIGN_PFX_BASE64: ${{ secrets.CODE_SIGN_PFX_BASE64 }}
+          CODE_SIGN_PASSWORD: ${{ secrets.CODE_SIGN_PASSWORD }}
+        run: .\Sign-Exe.ps1
+
+      - name: Report signature status
+        shell: powershell
+        run: |
+          $sig = Get-AuthenticodeSignature "$PWD\dist\Setup.exe"
+          Write-Host "Signature: $($sig.Status)"
+          if ($sig.SignerCertificate) { Write-Host "Signer: $($sig.SignerCertificate.Subject)" }
+          else { Write-Host '::warning::Artifact is unsigned - users will see a SmartScreen prompt.' }
+
       - name: Verify no secret keys were embedded
         shell: powershell
         run: |

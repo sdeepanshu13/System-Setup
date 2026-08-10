@@ -11,6 +11,16 @@ function Invoke-BackupFlow {
     <# Inventory this machine, let the user prune it, then save. Returns $true on success. #>
     param([Parameter(Mandatory)]$Manager, [Parameter(Mandatory)]$Scanner)
 
+    # Identity first: the backup has nowhere to go without it, and asking after
+    # a long scan meant the work was wasted if the user backed out.
+    $signIn = Show-SignInDialog -Manager $Manager -Purpose 'backup'
+    if ($null -eq $signIn) {
+        Show-Toast ("Backup cancelled.`r`n`r`n" +
+            'Your email and a passphrase are needed so the backup can be saved ' +
+            'and unlocked on your new machine.')
+        return $false
+    }
+
     try {
         Write-Host 'Scanning installed applications...' -ForegroundColor Cyan
         $apps = $Scanner.ScanApplications()
@@ -110,9 +120,6 @@ function Invoke-BackupFlow {
         Show-Toast 'Nothing selected, so there was nothing to back up.'
         return $false
     }
-
-    $signIn = Show-SignInDialog -Manager $Manager -Purpose 'backup'
-    if ($null -eq $signIn) { return $false }
 
     $data = New-ProfileData -Name $env:USERNAME `
         -Packages @($keptApps | Where-Object { $_.Id } | ForEach-Object { $_.Id }) `

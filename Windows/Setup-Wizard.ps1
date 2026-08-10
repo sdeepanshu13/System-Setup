@@ -19,6 +19,14 @@ Add-Type -AssemblyName System.Windows.Forms
 Add-Type -AssemblyName System.Drawing
 [System.Windows.Forms.Application]::EnableVisualStyles()
 
+# Show a readable message instead of the raw .NET "Unhandled exception" dialog,
+# whose Continue button just retriggers the same error.
+try {
+    [System.Windows.Forms.Application]::SetUnhandledExceptionMode(
+        [System.Windows.Forms.UnhandledExceptionMode]::CatchException)
+}
+catch { }
+
 $script:Ink = @{
     Bg      = [System.Drawing.Color]::FromArgb(30, 30, 30)
     Panel   = [System.Drawing.Color]::FromArgb(45, 45, 45)
@@ -28,6 +36,32 @@ $script:Ink = @{
     Good    = [System.Drawing.Color]::FromArgb(120, 220, 120)
     Bad     = [System.Drawing.Color]::FromArgb(255, 120, 120)
     Text    = [System.Drawing.Color]::White
+}
+
+function Get-Ink {
+    # $script:Ink isn't visible inside GetNewClosure() handlers, so dialogs take
+    # a local copy of this and close over that instead.
+    if ($script:Ink -and $script:Ink.Text) { return $script:Ink }
+    return @{
+        Bg      = [System.Drawing.Color]::FromArgb(30, 30, 30)
+        Panel   = [System.Drawing.Color]::FromArgb(45, 45, 45)
+        Accent  = [System.Drawing.Color]::FromArgb(0, 180, 255)
+        Primary = [System.Drawing.Color]::FromArgb(0, 120, 212)
+        Muted   = [System.Drawing.Color]::FromArgb(160, 160, 160)
+        Good    = [System.Drawing.Color]::FromArgb(120, 220, 120)
+        Bad     = [System.Drawing.Color]::FromArgb(255, 120, 120)
+        Text    = [System.Drawing.Color]::White
+    }
+}
+
+function Set-SafeColor {
+    # Assigning $null to ForeColor throws; fall back rather than crash the dialog.
+    param($Control, $Color, $Fallback = [System.Drawing.Color]::White)
+    try {
+        if ($Color -is [System.Drawing.Color]) { $Control.ForeColor = $Color }
+        else { $Control.ForeColor = $Fallback }
+    }
+    catch { try { $Control.ForeColor = $Fallback } catch { } }
 }
 
 function New-WizardForm {
@@ -102,11 +136,12 @@ function New-HeaderBar {
 function New-WizardLabel {
     param($Parent, [string]$Text, [int]$X, [int]$Y, [int]$W, [int]$H = 20,
         $Color = $null, [single]$Size = 9.5, [bool]$Bold = $false)
+    $ink = Get-Ink
     $l = New-Object System.Windows.Forms.Label
     $l.Text = $Text
     $l.Location = New-Object System.Drawing.Point($X, $Y)
     $l.Size = New-Object System.Drawing.Size($W, $H)
-    $l.ForeColor = if ($Color) { $Color } else { $script:Ink.Text }
+    Set-SafeColor $l $Color $ink.Text
     $style = if ($Bold) { [System.Drawing.FontStyle]::Bold } else { [System.Drawing.FontStyle]::Regular }
     $l.Font = New-Object System.Drawing.Font('Segoe UI', $Size, $style)
     $Parent.Controls.Add($l)
@@ -194,8 +229,10 @@ function Show-ModeDialog {
         }
         $card.Add_Click($click); $t.Add_Click($click); $d.Add_Click($click)
 
-        $hoverOn = { param($s, $e) $s.BackColor = [System.Drawing.Color]::FromArgb(60, 60, 60) }
-        $hoverOff = { param($s, $e) $s.BackColor = $script:Ink.Panel }
+        $hoverColor = [System.Drawing.Color]::FromArgb(60, 60, 60)
+        $baseColor = [System.Drawing.Color]::FromArgb(45, 45, 45)
+        $hoverOn = { param($s, $e) try { $s.BackColor = $hoverColor } catch { } }.GetNewClosure()
+        $hoverOff = { param($s, $e) try { $s.BackColor = $baseColor } catch { } }.GetNewClosure()
         $card.Add_MouseEnter($hoverOn); $card.Add_MouseLeave($hoverOff)
     }
 
@@ -392,6 +429,7 @@ function Show-SignInDialog {
     )
 
     $isRestore = $Purpose -eq 'restore'
+    $ink = Get-Ink          # local copy: closures below can't see $script:Ink
     $f = New-WizardForm -Title 'Verify it''s you' -Width 500 -Height 470
 
     New-WizardLabel $f 'Verify it''s you' 26 20 430 30 $script:Ink.Accent 14 $true | Out-Null
@@ -446,61 +484,74 @@ function Show-SignInDialog {
     $state = @{ Sent = $false; Result = $null }
 
     $btnGo.Add_Click({
-            $status.ForeColor = $script:Ink.Bad
-            $status.Text = ''
-            $id = $tbId.Text.Trim()
-            $pass = $tbPass.Text
+            try {
+                Set-SafeColor $status $ink.Bad
+                $status.Text = ''
+                $id = $tbId.Text.Trim()
+                $pass = $tbPass.Text
 
-            if ([string]::IsNullOrWhiteSpace($id)) { $status.Text = 'Enter your email or mobile.'; return }
-            if ([string]::IsNullOrEmpty($pass)) { $status.Text = 'A passphrase is required.'; return }
+                if ([string]::IsNullOrWhiteSpace($id)) { $status.Text = 'Enter your email or mobile.'; return }
+                if ([string]::IsNullOrEmpty($pass)) { $status.Text = 'A passphrase is required.'; return }
 
-            if (-not $state.Sent) {
-                $btnGo.Enabled = $false
-                $status.ForeColor = $script:Ink.Muted
-                $status.Text = 'Sending verification code...'
-                $f.Refresh()
-                try { $begin = $Manager.BeginVerification($id) }
-                catch { $begin = @{ Ok = $false; Error = $_.Exception.Message } }
+                if (-not $state.Sent) {
+                    $btnGo.Enabled = $false
+                    Set-SafeColor $status $ink.Muted
+                    $status.Text = 'Sending verification code...'
+                    $f.Refresh()
+                    try { $begin = $Manager.BeginVerification($id) }
+                    catch { $begin = @{ Ok = $false; Error = $_.Exception.Message } }
+                    $btnGo.Enabled = $true
+
+                    if (-not $begin.Ok) {
+                        Set-SafeColor $status $ink.Bad
+                        $status.Text = "Couldn't send code: $($begin.Error)"
+                        return
+                    }
+                    $state.Sent = $true
+                    $lblCode.Visible = $true; $tbCode.Visible = $true; $tbCode.Focus()
+                    $btnGo.Text = 'Verify'
+                    Set-SafeColor $status $ink.Good
+                    $status.Text = if ($begin.Method -eq 'dev') { 'Dev mode: code printed to the console.' }
+                    else { "Code sent to your $($begin.Channel)." }
+                    return
+                }
+
+                if (-not $Manager.Verified) {
+                    $chk = $Manager.CompleteVerification($tbCode.Text)
+                    if (-not $chk.Ok) {
+                        Set-SafeColor $status $ink.Bad
+                        $status.Text = "Code: $($chk.Reason)"
+                        return
+                    }
+                }
+
+                $loaded = $Manager.LoadProfile($pass)
+                if (-not $loaded.Ok) { $status.Text = "Couldn't reach your profile: $($loaded.Error)"; return }
+
+                if ($loaded.Found) {
+                    if (-not $loaded.Decrypted) { $status.Text = 'Incorrect passphrase for this account.'; return }
+                    $state.Result = @{ Passphrase = $pass; Data = $loaded.Data }
+                }
+                else {
+                    if ($isRestore) { $status.Text = 'No backup found for this account.'; return }
+                    if ($tbPass.Text -ne $tbConfirm.Text) { $status.Text = "Passphrases don't match (new account)."; return }
+                    $state.Result = @{ Passphrase = $pass; Data = $null }
+                }
+
+                $f.DialogResult = [System.Windows.Forms.DialogResult]::OK
+                $f.Close()
+            }
+            catch {
+                # Never let the raw .NET crash dialog surface here.
                 $btnGo.Enabled = $true
-
-                if (-not $begin.Ok) {
-                    $status.ForeColor = $script:Ink.Bad
-                    $status.Text = "Couldn't send code: $($begin.Error)"
-                    return
+                try {
+                    Set-SafeColor $status $ink.Bad
+                    $status.Text = 'Something went wrong -- see the console for details.'
                 }
-                $state.Sent = $true
-                $lblCode.Visible = $true; $tbCode.Visible = $true; $tbCode.Focus()
-                $btnGo.Text = 'Verify'
-                $status.ForeColor = $script:Ink.Good
-                $status.Text = if ($begin.Method -eq 'dev') { 'Dev mode: code printed to the console.' }
-                else { "Code sent to your $($begin.Channel)." }
-                return
+                catch { }
+                Write-Host "Sign-in error: $($_.Exception.Message)" -ForegroundColor Red
+                Write-Host $_.ScriptStackTrace -ForegroundColor DarkGray
             }
-
-            if (-not $Manager.Verified) {
-                $chk = $Manager.CompleteVerification($tbCode.Text)
-                if (-not $chk.Ok) {
-                    $status.ForeColor = $script:Ink.Bad
-                    $status.Text = "Code: $($chk.Reason)"
-                    return
-                }
-            }
-
-            $loaded = $Manager.LoadProfile($pass)
-            if (-not $loaded.Ok) { $status.Text = "Couldn't reach your profile: $($loaded.Error)"; return }
-
-            if ($loaded.Found) {
-                if (-not $loaded.Decrypted) { $status.Text = 'Incorrect passphrase for this account.'; return }
-                $state.Result = @{ Passphrase = $pass; Data = $loaded.Data }
-            }
-            else {
-                if ($isRestore) { $status.Text = 'No backup found for this account.'; return }
-                if ($tbPass.Text -ne $tbConfirm.Text) { $status.Text = "Passphrases don't match (new account)."; return }
-                $state.Result = @{ Passphrase = $pass; Data = $null }
-            }
-
-            $f.DialogResult = [System.Windows.Forms.DialogResult]::OK
-            $f.Close()
         }.GetNewClosure())
 
     [void]$f.ShowDialog()

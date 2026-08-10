@@ -187,6 +187,13 @@ otherwise it falls back to encrypted files synced through git.
    Override at runtime with `SETUP_SUPABASE_URL` / `SETUP_SUPABASE_KEY`.
 3. For volume, set a custom SMTP provider in Auth settings -- the built-in mailer
    is rate-limited to a few messages per hour.
+4. **Auth -> Emails: every template must send `{{ .Token }}`, never
+   `{{ .ConfirmationURL }}`.** Fix *Confirm signup*, *Magic Link* and *Reset
+   password*. Defaults are link-based, and this app has no browser to catch a
+   redirect -- the link lands on `localhost:3000` and, worse, corporate mail
+   scanners pre-click it, consuming the one-time token before the user sees it.
+   A first-time address hits *Confirm signup* (`type=signup`), so fixing only
+   *Magic Link* leaves new users broken while existing users work.
 
 #### Key safety
 

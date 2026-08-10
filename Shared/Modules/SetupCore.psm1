@@ -409,18 +409,25 @@ class SupabaseClient {
     }
 
     [hashtable] VerifyOtp([UserIdentity]$identity, [string]$code) {
-        $body = @{ token = ($code -replace '\D', ''); type = $identity.AuthChannel() }
-        if ($identity.IsEmail()) { $body['email'] = $identity.Value } else { $body['phone'] = $identity.ToE164() }
-        try {
-            $r = Invoke-RestMethod -Method Post -Uri "$($this.Config.Url)/auth/v1/verify" `
-                -Headers @{ apikey = $this.Config.Key; 'Content-Type' = 'application/json' } `
-                -Body ($body | ConvertTo-Json) -TimeoutSec $this.TimeoutSec
-            if (-not $r.access_token) { return @{ Ok = $false; Error = 'no token returned' } }
-            $this.AccessToken = $r.access_token
-            $this.UserId = $r.user.id
-            return @{ Ok = $true }
+        # A first-time address is confirmed with type 'signup', a returning one
+        # with 'email'. Which one you get depends on server state, so try both.
+        $types = if ($identity.IsEmail()) { @('email', 'signup') } else { @('sms') }
+        $lastError = 'verification failed'
+        foreach ($type in $types) {
+            $body = @{ token = ($code -replace '\D', ''); type = $type }
+            if ($identity.IsEmail()) { $body['email'] = $identity.Value } else { $body['phone'] = $identity.ToE164() }
+            try {
+                $r = Invoke-RestMethod -Method Post -Uri "$($this.Config.Url)/auth/v1/verify" `
+                    -Headers @{ apikey = $this.Config.Key; 'Content-Type' = 'application/json' } `
+                    -Body ($body | ConvertTo-Json) -TimeoutSec $this.TimeoutSec
+                if (-not $r.access_token) { $lastError = 'no token returned'; continue }
+                $this.AccessToken = $r.access_token
+                $this.UserId = $r.user.id
+                return @{ Ok = $true }
+            }
+            catch { $lastError = $this.ErrorText($_) }
         }
-        catch { return @{ Ok = $false; Error = $this.ErrorText($_) } }
+        return @{ Ok = $false; Error = $lastError }
     }
 
     hidden [hashtable] AuthHeaders() {

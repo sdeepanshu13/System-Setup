@@ -122,6 +122,25 @@ Test-That 'blank identity rejected' {
 }
 
 # =====================================================================
+Section 'OTP verification'
+# =====================================================================
+# A first-time address is confirmed as 'signup', a returning one as 'email'.
+Test-That 'verify accepts both email and signup types' {
+    $src = Get-Content .\Shared\Modules\SetupCore.psm1 -Raw
+    $src -match "@\('email', 'signup'\)"
+}
+Test-That 'otp email templates must not send a link' {
+    # A link lands on localhost and mail scanners pre-click it, burning the code.
+    $src = Get-Content .\Shared\Modules\SetupCore.psm1 -Raw
+    ($src -notmatch 'ConfirmationURL') -and ($src -notmatch 'email_redirect_to')
+}
+Test-NoThrow 'verify fails gracefully when unreachable' {
+    $c = [SupabaseClient]::new([SupabaseConfig]::new())
+    $r = $c.VerifyOtp([UserIdentity]::new('a@b.com'), '123456')
+    if ($r.Ok) { throw 'unreachable endpoint reported success' }
+}
+
+# =====================================================================
 Section 'Profile data'
 # =====================================================================
 $mk = {

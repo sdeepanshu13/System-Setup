@@ -34,6 +34,12 @@ jobs:
         with:
           fetch-depth: 0 # tags needed to work out the next version
 
+      # Gate the release on the suite. A red suite must never reach users,
+      # because the README always repoints at the newest build.
+      - name: Run test suite
+        shell: powershell
+        run: .\Tests\Run-Tests.ps1
+
       - name: Work out the next version
         id: ver
         shell: bash

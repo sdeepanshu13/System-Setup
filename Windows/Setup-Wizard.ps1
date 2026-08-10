@@ -87,11 +87,18 @@ function New-WizardForm {
 }
 
 function New-ScrollHost {
-    <# Scrollable content area that fills whatever space is left above the buttons. #>
+    <#
+        Scrollable content area that fills whatever space is left above the buttons.
+        Add this to the form BEFORE the header and button bars: WinForms docks in
+        reverse z-order, so a Fill added last claims the whole client area and the
+        bars then overlay it, hiding the end of the content.
+        AutoScroll stays off -- the FlowLayoutPanel inside is the scroller, and two
+        nested AutoScroll containers fight over the wheel and stack scrollbars.
+    #>
     param($Parent)
     $p = New-Object System.Windows.Forms.Panel
     $p.Dock = 'Fill'
-    $p.AutoScroll = $true
+    $p.AutoScroll = $false
     $p.BackColor = $script:Ink.Bg
     $p.Padding = New-Object System.Windows.Forms.Padding(20, 10, 20, 10)
     $Parent.Controls.Add($p)
@@ -173,8 +180,8 @@ function Show-ModeDialog {
     # Returns 'backup', 'restore', 'fresh' or $null when cancelled.
     $f = New-WizardForm -Title 'System-Setup' -Width 620 -Height 560
 
-    $bar = New-ButtonBar $f
     $host_ = New-ScrollHost $f
+    $bar = New-ButtonBar $f
     New-HeaderBar $f 'What would you like to do?' 'Applications and settings only -- your files are never read or uploaded.' | Out-Null
 
     $options = @(
@@ -276,11 +283,11 @@ function Show-ChecklistDialog {
 
     $f = New-WizardForm -Title $Title -Width 760 -Height 620
 
+    $host_ = New-ScrollHost $f
     $bar = New-ButtonBar $f 60
     $status = New-Object System.Windows.Forms.Panel
     $status.Dock = 'Bottom'; $status.Height = 26; $status.BackColor = $script:Ink.Bg
     $f.Controls.Add($status)
-    $host_ = New-ScrollHost $f
     New-HeaderBar $f $Title $Message 88 | Out-Null
 
     $flow = New-Object System.Windows.Forms.FlowLayoutPanel

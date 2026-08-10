@@ -280,6 +280,32 @@ Test-NoThrow 'scroll host + button bar build' {
     $f = New-WizardForm -Title 't' -Width 500 -Height 400
     New-ScrollHost $f | Out-Null; New-ButtonBar $f | Out-Null; $f.Dispose()
 }
+# WinForms docks in reverse z-order, so a Fill panel added after the bars claims
+# the whole client area and the bars overlay it -- the tail of the list ends up
+# unreachable underneath the buttons.
+Test-That 'scroll area is not hidden behind the button bar' {
+    $f = New-WizardForm -Title 't' -Width 760 -Height 620
+    $sh = New-ScrollHost $f
+    $bb = New-ButtonBar $f 60
+    New-HeaderBar $f 'T' 'S' 88 | Out-Null
+    $f.CreateControl(); $f.PerformLayout()
+    $ok = ($sh.Height -gt 0) -and (($sh.Top + $sh.Height) -le $bb.Top)
+    $f.Dispose()
+    $ok
+}
+Test-That 'dialogs add the scroll area before the bars' {
+    $src = Get-Content .\Windows\Setup-Wizard.ps1 -Raw
+    $bad = @([regex]::Matches($src, '(?s)function Show-\w+ \{.*?\r?\n\}') | Where-Object {
+            $b = $_.Value
+            ($b -match 'New-ScrollHost') -and ($b -match 'New-ButtonBar') -and
+            ($b.IndexOf('New-ScrollHost') -gt $b.IndexOf('New-ButtonBar'))
+        })
+    $bad.Count -eq 0
+}
+Test-That 'only one scroller per screen' {
+    # Nested AutoScroll containers stack scrollbars and fight over the wheel.
+    (New-ScrollHost (New-WizardForm -Title 't' -Width 500 -Height 400)).AutoScroll -eq $false
+}
 
 # =====================================================================
 Section 'Flow wiring'

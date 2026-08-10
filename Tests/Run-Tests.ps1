@@ -209,6 +209,39 @@ Test-That 'click handler runs and sets a colour' {
     $btn.PerformClick()
     ($lb.Text -eq 'handled') -and ($lb.ForeColor.R -gt 0)
 }
+# The shipped crash, and the reason it survived a green suite.
+#
+# A GetNewClosure() handler resolves commands against global scope, not the
+# script scope this file was dot-sourced into. Those are the same thing for a
+# top-level `powershell -File` run, and different in production, where
+# install.ps1 invokes Setup.ps1 one scope down. So the in-process test passed
+# on a laptop and the identical code threw "Set-SafeColor is not recognized"
+# for the user.
+#
+# Run the probe in a child process with -Command & to pin the production scope
+# depth, instead of inheriting whatever depth this suite happens to run at.
+Test-That 'handler resolves helpers at production scope depth' {
+    $probe = Join-Path $env:TEMP 'setup-scope-probe.ps1'
+    @'
+. .\Windows\Setup-Wizard.ps1
+$ink = Get-Ink
+$lb = New-Object System.Windows.Forms.Label
+$btn = New-Object System.Windows.Forms.Button
+$btn.Add_Click({ Set-SafeColor $lb $ink.Bad; $lb.Text = 'handled' }.GetNewClosure())
+try { $btn.PerformClick() } catch { }
+if ($lb.Text -eq 'handled') { 'PROBE=OK' } else { 'PROBE=BAD' }
+'@ | Set-Content -Path $probe -Encoding UTF8
+    try {
+        $out = & powershell -NoProfile -ExecutionPolicy Bypass -Command "& '$probe'" 2>&1
+        "$out" -match 'PROBE=OK'
+    }
+    finally { Remove-Item $probe -Force -ErrorAction SilentlyContinue }
+}
+# Structural backstop: true or false identically in every topology.
+Test-That 'closure-facing helpers are declared global' {
+    $src = Get-Content .\Windows\Setup-Wizard.ps1 -Raw
+    ($src -match 'function global:Set-SafeColor') -and ($src -match 'function global:Get-Ink')
+}
 Test-That 'no colour lookups inside handlers' {
     $null -eq (Select-String -Path .\Windows\Setup-Wizard.ps1 -Pattern 'script:Ink' |
         Where-Object { $_.Line -match 'param\(\$s, \$e\)|Add_Click' })
@@ -218,8 +251,9 @@ Test-That 'sign-in handler has a catch' { Select-String -Path .\Windows\Setup-Wi
 
 foreach ($fn in @('Show-ModeDialog', 'Show-ChecklistDialog', 'Show-RepoFolderDialog',
         'Show-SignInDialog', 'New-WizardForm', 'New-ScrollHost', 'New-ButtonBar')) {
-    $name = $fn
-    Test-That "defined: $fn" { [bool](Get-Command $name -ErrorAction SilentlyContinue) }.GetNewClosure()
+    # Not GetNewClosure(): a closure runs in its own module scope and cannot see
+    # script-scoped functions, so every one of these would report a false FAIL.
+    Test-That "defined: $fn" ([scriptblock]::Create("[bool](Get-Command '$fn' -ErrorAction SilentlyContinue)"))
 }
 Test-That 'form scales with DPI' { (New-WizardForm -Title 't' -Width 500 -Height 400).AutoScaleMode -eq [System.Windows.Forms.AutoScaleMode]::Font }
 Test-That 'form is resizable' { (New-WizardForm -Title 't' -Width 500 -Height 400).FormBorderStyle -eq 'Sizable' }
@@ -234,8 +268,7 @@ Section 'Flow wiring'
 . .\Windows\Setup-Flows.ps1
 foreach ($fn in @('Invoke-BackupFlow', 'Invoke-RestoreFlow', 'Restore-Repositories',
         'Restore-Dotfiles', 'Restore-ToolLists')) {
-    $name = $fn
-    Test-That "defined: $fn" { [bool](Get-Command $name -ErrorAction SilentlyContinue) }.GetNewClosure()
+    Test-That "defined: $fn" ([scriptblock]::Create("[bool](Get-Command '$fn' -ErrorAction SilentlyContinue)"))
 }
 Test-That 'flows avoid module type literals' {
     -not (Select-String -Path .\Windows\Setup-Flows.ps1 -Pattern '\-is \[(InstalledApp|GitRepository)\]' -Quiet)

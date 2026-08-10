@@ -38,7 +38,11 @@ $script:Ink = @{
     Text    = [System.Drawing.Color]::White
 }
 
-function Get-Ink {
+# global: on purpose. GetNewClosure() handlers run in their own module scope,
+# which resolves commands against global -- not the script scope this file is
+# dot-sourced into. Without this, every handler below dies with
+# "Set-SafeColor is not recognized" whenever Setup.ps1 isn't the top-level script.
+function global:Get-Ink {
     # $script:Ink isn't visible inside GetNewClosure() handlers, so dialogs take
     # a local copy of this and close over that instead.
     if ($script:Ink -and $script:Ink.Text) { return $script:Ink }
@@ -54,7 +58,7 @@ function Get-Ink {
     }
 }
 
-function Set-SafeColor {
+function global:Set-SafeColor {
     # Assigning $null to ForeColor throws; fall back rather than crash the dialog.
     param($Control, $Color, $Fallback = [System.Drawing.Color]::White)
     try {
